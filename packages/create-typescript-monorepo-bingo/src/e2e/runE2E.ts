@@ -270,6 +270,12 @@ const selected = requested.length
   : scenarios;
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ctm-e2e-'));
+
+// Keeps nx from writing to the user's own ~/.nx, or leaving a daemon running.
+process.env.NX_CACHE_DIRECTORY = path.join(workspace, '.nx/cache');
+process.env.NX_DAEMON = 'false';
+process.env.NX_NO_CLOUD = 'true';
+process.env.NX_WORKSPACE_DATA_DIRECTORY = path.join(workspace, '.nx/workspace-data');
 const results: { failures: string[]; name: string }[] = [];
 
 for (const scenario of selected) {
