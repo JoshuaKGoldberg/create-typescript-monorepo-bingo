@@ -77,6 +77,7 @@ describe(prepareRoot, () => {
       node: '26.13.1',
       nodeEngines: '>=22',
       owner: 'my-org',
+      packagesRunVitest: true,
       packages: [
         {
           directory: 'packages/a',

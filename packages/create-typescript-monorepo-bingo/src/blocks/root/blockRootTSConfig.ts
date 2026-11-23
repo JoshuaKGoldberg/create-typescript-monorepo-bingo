@@ -51,6 +51,9 @@ export const blockRootTSConfig = rootBase.createBlock({
     }
 
     const existing = parseJsonText(props.existing);
+    const existingOptions = (existing.compilerOptions ?? {}) as Record<string, unknown>;
+    const setsModule =
+      existingOptions.module !== undefined || existingOptions.moduleResolution !== undefined;
     const existingReferences = (existing.references as TSConfigReference[] | undefined) ?? [];
     const references = existingReferences.map((reference) => reference.path);
     const normalized = new Set(references.map(normalizePath));
@@ -84,21 +87,28 @@ export const blockRootTSConfig = rootBase.createBlock({
       ...(existingInclude
         ? configGlobs.filter(
             (glob) =>
-              !existingInclude.some((entry) =>
-                // A config CTM writes there: eslint.config.ts, or packages/x/tsdown.config.ts.
-                includeCovers(
-                  entry,
-                  glob === './*.config.ts'
-                    ? 'eslint.config.ts'
-                    : glob.slice(2).replace('*.config', 'tsdown.config').replaceAll('*', 'x'),
-                ),
-              ),
+              // The config files CTM writes there, each of which needs to be covered.
+              !(
+                glob === './*.config.ts'
+                  ? ['eslint', 'knip', 'oxfmt', 'tsdown', 'vitest'].map(
+                      (name) => `${name}.config.ts`,
+                    )
+                  : [glob.slice(2).replace('*.config', 'tsdown.config').replaceAll('*', 'x')]
+              ).every((file) => existingInclude.some((entry) => includeCovers(entry, file))),
           )
         : []),
       ...(props.include ?? []),
     ]);
 
     return {
+      suggestions:
+        props.rootNotModule &&
+        setsModule &&
+        String(existingOptions.module).toLowerCase() !== 'preserve'
+          ? [
+              'The root package.json isn\'t "type": "module", so root config files that use import.meta, like vitest.config.ts, fail to type check with the root tsconfig.json\'s module setting. Set "module": "preserve" and "moduleResolution": "bundler" in it, or "type": "module" in package.json.',
+            ]
+          : [],
       files: {
         'tsconfig.json': formatJson(
           {
@@ -121,7 +131,9 @@ export const blockRootTSConfig = rootBase.createBlock({
                       target: 'ES2022',
                       types: ['node'],
                     }),
-                  ...(props.rootNotModule && { module: 'preserve', moduleResolution: 'bundler' }),
+                  // The pair goes together: either one alone is an invalid combination.
+                  ...(props.rootNotModule &&
+                    !setsModule && { module: 'preserve', moduleResolution: 'bundler' }),
                   noEmit: true,
                   tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.json',
                 },

@@ -156,6 +156,8 @@ A transition adds what a repository is missing and leaves what it has:
 - A root `tsconfig.json` that packages extend is left as it is, without a `tsc -b` typecheck, since packages would inherit what CTM adds to it.
 - Oxfmt can't load `oxfmt.config.ts` in a root with `"type": "commonjs"`; a suggestion says so.
 - Package tsconfigs that don't extend the build package's base are the repository's own: CTM leaves them alone, and existing packages without one don't get one.
+- Adopting CTM in a repository without a formatter formats it in full once with Oxfmt. A repository without ESLint gets CTM's strict, type-aware rules, which existing code may not meet yet: a suggestion explains running `pnpm lint --fix` and recording the rest with `eslint --suppress-all`.
+- Packages that run Vitest with their own scripts and no config of their own keep doing so: CTM adds no root `vitest.config.ts`, which they'd pick up instead.
 - pnpm 12.0.0 or newer is needed.
 
 ## Development

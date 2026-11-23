@@ -260,7 +260,11 @@ function normalizeUses(uses: string) {
  * and `pnpm exec tsc -b` compare equal when the typecheck script is `tsc -b`.
  */
 function normalizeRun(run: string, scripts: Record<string, string>): string {
-  const command = run.trim().replace(/^(?:pnpm (?:run |exec )?|npx )/, '');
+  const command = run
+    .trim()
+    .replace(/^(?:pnpm (?:run |exec )?|npx )/, '')
+    // A filter with its dependencies, like --filter=site..., runs the same package's script.
+    .replaceAll(/(--filter[= ]\S+?)\.\.\.(?=\s|$)/g, '$1');
   const [name = '', ...args] = command.split(/\s+/);
   const script = scripts[name];
   return script && script !== command

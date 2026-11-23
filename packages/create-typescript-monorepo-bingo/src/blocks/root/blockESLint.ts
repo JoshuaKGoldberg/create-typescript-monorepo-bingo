@@ -1,5 +1,5 @@
 import type { IntakeDirectory } from 'bingo-fs';
-import semver from 'semver';
+import { sortPackageJson } from 'sort-package-json';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
@@ -22,6 +22,7 @@ import {
   readESLintExtras,
   readESLintIgnoresWithSource,
 } from '../../utils/staticConfig.ts';
+import { getMinimumVersion } from '../../utils/versions.ts';
 import { blockGitHubActionsCI, type WorkflowStep } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 import { blockVSCode } from './blockVSCode.ts';
@@ -56,10 +57,11 @@ export const blockESLint = rootBase.createBlock({
       .map((dependencies) => (dependencies as Record<string, string> | undefined)?.eslint)
       .find((specifier) => specifier !== undefined);
     // CTM's flat config, plugins and typed linting need ESLint 9 or newer.
-    const eslintMinimum =
-      eslintSpecifier && semver.validRange(eslintSpecifier)
-        ? semver.minVersion(eslintSpecifier)
-        : undefined;
+    const eslintMinimum = getMinimumVersion(
+      'eslint',
+      eslintSpecifier,
+      readText(files, 'pnpm-workspace.yaml'),
+    );
     const vitest = options.testRunner !== 'other';
     const packageJsonRulesOff = findMissingPackageFields(files, options);
     const extras = readESLintExtras(
@@ -74,10 +76,21 @@ export const blockESLint = rootBase.createBlock({
       ),
       // Without Vitest, CTM's own Vitest entry and import are dropped, but only as CTM wrote
       // them: a repository's own entry for test files, like one for Jest, stays.
-      vitest ? undefined : { configs: [vitestConfigEntry], imports: [vitestImport] },
+      {
+        configs: vitest ? [] : [vitestConfigEntry],
+        imports: vitest ? [] : [vitestImport],
+        namePrefix: ownEntryPrefix,
+      },
     );
+    const rootScripts = rootManifest.scripts as Record<string, string> | undefined;
     return {
       ...(alternate && { alternate }),
+      // A repository adopting ESLint, which may not meet CTM's strict rules yet.
+      ...(existing === undefined &&
+        !alternate &&
+        !legacy &&
+        Object.keys(files).length > 0 && { adopting: true }),
+      ...(rootScripts?.lint !== undefined && { rootLint: true }),
       ...(packageJsonRulesOff.length && { packageJsonRulesOff }),
       ...(eslintMinimum && eslintMinimum.major < 9 && { oldESLint: eslintSpecifier }),
       ...(existingIgnores && { existingIgnores }),
@@ -91,7 +104,9 @@ export const blockESLint = rootBase.createBlock({
   props: {
     alternate: z.string().optional(),
     legacy: z.string().optional(),
+    adopting: z.boolean().optional(),
     oldESLint: z.string().optional(),
+    rootLint: z.boolean().optional(),
     packageJsonRulesOff: z.array(z.string()).optional(),
     unowned: z.boolean().optional(),
     unparseable: z.boolean().optional(),
@@ -118,8 +133,18 @@ export const blockESLint = rootBase.createBlock({
     lintPrebuildSteps: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
+    // A repository's own ESLint setup still gets a CI job for its lint script.
+    const repositoryLint = props.rootLint
+      ? [
+          blockGitHubActionsCI({
+            jobs: [{ id: 'lint', name: 'Lint', steps: [{ run: 'pnpm lint' }] }],
+          }),
+        ]
+      : [];
+
     if (props.oldESLint) {
       return {
+        extensions: repositoryLint,
         suggestions: [
           `This repository uses ESLint ${props.oldESLint}, so CTM didn't set up its ESLint config, which needs ESLint 9 or newer. Update ESLint and re-run to add it.`,
         ],
@@ -127,7 +152,10 @@ export const blockESLint = rootBase.createBlock({
     }
 
     if (props.unowned) {
-      return { suggestions: [describeUnownedFile('eslint.config.ts')] };
+      return {
+        extensions: repositoryLint,
+        suggestions: [describeUnownedFile('eslint.config.ts')],
+      };
     }
 
     const ignores = mergeList(props.existingIgnores?.values, [
@@ -147,10 +175,19 @@ export const blockESLint = rootBase.createBlock({
         ? insertIgnores(existingIgnores, added)
         : `\n${added.map((ignore) => `      ${ignore},`).join('\n')}\n    `;
     const workflowExtension = options.workflowExtension ?? defaults.workflowExtension;
-    const prebuildSteps: WorkflowStep[] = (props.lintPrebuildSteps ?? []).map((run) => ({ run }));
+    // Packages whose exports point at build output have no types until they're built.
+    const prebuildSteps: WorkflowStep[] = [
+      ...(options.packagesExportBuildOutput ? ['pnpm build'] : []),
+      ...(props.lintPrebuildSteps ?? []),
+    ].map((run) => ({ run }));
 
-    return withoutAlternate(props.alternate, 'eslint.config.ts', {
+    const creation = withoutAlternate(props.alternate, 'eslint.config.ts', {
       suggestions: [
+        ...(props.adopting
+          ? [
+              "CTM added ESLint with strict, type-aware rules, which existing code may not meet yet. Run `pnpm lint --fix`, then `pnpm exec eslint --suppress-all` to record what's left as ESLint bulk suppressions to fix over time. Files no tsconfig includes, like test files a tsconfig excludes, need one that includes them for typed linting.",
+            ]
+          : []),
         ...(props.unparseable
           ? [
               "eslint.config.ts couldn't be parsed, so it wasn't updated. Fix its syntax and re-run.",
@@ -222,8 +259,17 @@ export const blockESLint = rootBase.createBlock({
         }),
       },
     });
+
+    // With its own config, like eslint.config.js, the repository's lint script still runs.
+    return props.alternate ? { ...creation, extensions: repositoryLint } : creation;
   },
 });
+
+/**
+ * Names CTM gives entries it only sometimes writes, so they're told apart from a
+ * repository's own entries for the same files, and dropped once CTM no longer writes them.
+ */
+const ownEntryPrefix = 'create-typescript-monorepo-bingo/';
 
 const vitestImport = "import vitest from '@vitest/eslint-plugin';";
 
@@ -356,6 +402,7 @@ ${
     ? `  {
     // Fields existing packages don't have, which CTM doesn't fill in for them
     files: ['**/package.json'],
+    name: '${ownEntryPrefix}missing-package-fields',
     rules: {
 ${packageJsonRulesOff.map((rule) => `      'package-json/${rule}': 'off',`).join('\n')}
     },
@@ -457,12 +504,28 @@ function findMissingPackageFields(files: IntakeDirectory, options: RootOptions):
     return text === undefined ? [] : [{ filled, manifest: parseJsonText(text) }];
   });
 
-  return requiredFields
-    .filter(([rule, has, checksPrivate]) =>
-      manifests.some(
-        ({ filled, manifest }) =>
-          !filled.includes(rule) && (checksPrivate || manifest.private !== true) && !has(manifest),
-      ),
-    )
-    .map(([rule]) => rule);
+  const sameKeys = (a: object | undefined, b: object | undefined) =>
+    JSON.stringify(Object.keys(a ?? {})) === JSON.stringify(Object.keys(b ?? {}));
+  // CTM keeps an existing manifest's key and script order, which these rules check.
+  const unsorted = manifests.some(({ manifest }) => {
+    const sorted = sortPackageJson(manifest);
+    return (
+      !sameKeys(manifest, sorted) ||
+      !sameKeys(manifest.scripts as object | undefined, sorted.scripts as object | undefined)
+    );
+  });
+
+  return [
+    ...requiredFields
+      .filter(([rule, has, checksPrivate]) =>
+        manifests.some(
+          ({ filled, manifest }) =>
+            !filled.includes(rule) &&
+            (checksPrivate || manifest.private !== true) &&
+            !has(manifest),
+        ),
+      )
+      .map(([rule]) => rule),
+    ...(unsorted ? ['order-properties', 'sort-collections'] : []),
+  ];
 }

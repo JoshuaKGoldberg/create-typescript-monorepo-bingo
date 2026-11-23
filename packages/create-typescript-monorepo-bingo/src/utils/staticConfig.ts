@@ -371,7 +371,7 @@ type SpannedNode = AstNode & { end: number; start: number };
 export function readESLintExtras(
   sourceText: string | undefined,
   ownSource: string,
-  dropped?: { configs: string[]; imports: string[] },
+  dropped?: { configs: string[]; imports: string[]; namePrefix?: string },
 ): ESLintExtras | undefined {
   if (sourceText === undefined) {
     return undefined;
@@ -456,6 +456,11 @@ export function readESLintExtras(
       continue;
     }
 
+    // An entry CTM named as its own, which CTM no longer writes, is dropped.
+    if (index === -1 && dropped?.namePrefix && getEntryName(arg)?.startsWith(dropped.namePrefix)) {
+      continue;
+    }
+
     if (index === -1) {
       configs.push([...comments, sourceText.slice(arg.start, arg.end)].join('\n  '));
       collectReferences(arg, referenced);
@@ -531,6 +536,18 @@ function collectReferences(node: unknown, names: Set<string>, binding = false): 
       declares && !(key === 'key' && current.computed) && key !== 'typeAnnotation',
     );
   }
+}
+
+function getEntryName(node: AstNode): string | undefined {
+  if (node.type !== 'ObjectExpression') {
+    return undefined;
+  }
+
+  const property = (node.properties as AstNode[]).find(
+    (candidate) => candidate.type === 'Property' && getKeyName(candidate.key as AstNode) === 'name',
+  );
+  const value = property?.value as AstNode | undefined;
+  return value?.type === 'Literal' && typeof value.value === 'string' ? value.value : undefined;
 }
 
 function getImportedNames(node: AstNode): string[] {

@@ -46,7 +46,9 @@ export const blockSite = rootBase.createBlock({
           jobs: sites
             .filter((site) => site.scripts?.includes('build'))
             .map((site, index) => {
-              const command = `pnpm --filter=${site.name} build`;
+              // A site may import workspace packages' build output, which a fresh checkout
+              // doesn't have: the ... filter builds them first.
+              const command = `pnpm --filter=${site.name}... build`;
               const rootScript = findRootScript(command);
               return {
                 id: index === 0 ? 'build_site' : `build_site_${site.name.replace(/\W/g, '_')}`,

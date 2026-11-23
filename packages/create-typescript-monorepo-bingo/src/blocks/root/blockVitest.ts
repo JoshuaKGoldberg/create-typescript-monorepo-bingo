@@ -8,6 +8,7 @@ import {
   findAlternateConfig,
   isOwnedFile,
   ownedFileMarker,
+  parseJsonText,
   readText,
   withoutAlternate,
 } from '../../utils/files.ts';
@@ -29,8 +30,12 @@ export const blockVitest = rootBase.createBlock({
   intake({ files }) {
     const alternate = findAlternateConfig(files, 'vitest');
     const existing = readText(files, 'vitest.config.ts');
+    const rootTest = (
+      parseJsonText(readText(files, 'package.json')).scripts as Record<string, string> | undefined
+    )?.test;
     return {
       ...(alternate && { alternate }),
+      ...(rootTest !== undefined && { rootTest: true }),
       ...(existing !== undefined && { existing: true }),
       ...(!isOwnedFile(existing) && { unowned: true }),
     };
@@ -38,10 +43,28 @@ export const blockVitest = rootBase.createBlock({
   props: {
     alternate: z.string().optional(),
     existing: z.boolean().optional(),
+    rootTest: z.boolean().optional(),
     unowned: z.boolean().optional(),
     coverageExclude: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
+    // Packages that run Vitest themselves would pick up a root config instead of Vitest's
+    // defaults, so there's none: CI runs the repository's own tests.
+    if (options.packagesRunVitest) {
+      return {
+        suggestions: [
+          "Packages run Vitest without configs of their own, which would use a root vitest.config.ts instead, so CTM didn't add one. Give each package a config to use CTM's root config's projects.",
+        ],
+        extensions: props.rootTest
+          ? [
+              blockGitHubActionsCI({
+                jobs: [{ id: 'test', name: 'Test', steps: [{ run: 'pnpm test' }] }],
+              }),
+            ]
+          : [],
+      };
+    }
+
     // A repository testing with something else, like node --test, keeps its own setup.
     if (options.testRunner === 'other') {
       return props.existing && !props.unowned

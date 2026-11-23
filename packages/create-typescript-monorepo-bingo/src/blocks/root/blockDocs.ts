@@ -245,7 +245,11 @@ ${
 } and place reports in the \`coverage/\` directory.
 `
 }
-## Type Checking
+${
+  // Packages extending the root tsconfig.json leave it without a tsc -b typecheck.
+  options.rootTSConfigExtended
+    ? ''
+    : `## Type Checking
 
 TypeScript 7 runs type checking across every package's project references:
 
@@ -255,7 +259,8 @@ pnpm typecheck
 
 The \`typescript\` dependency is aliased to TypeScript 6 for tools that use TypeScript's JavaScript API, such as typescript-eslint and tsdown's declaration generator.
 
-## Releasing
+`
+}## Releasing
 
 Releases are managed with [Changesets](https://github.com/changesets/changesets).
 Add a changeset describing your change with:
@@ -343,13 +348,18 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 	<a href="${url}/blob/main/LICENSE.md" target="_blank"><img alt="📝 License: MIT" src="https://img.shields.io/badge/%F0%9F%93%9D_license-MIT-21bb42.svg" /></a>
 </p>
 
-## Packages
+${
+  // Without packages CTM manages, an empty table would only have its header.
+  packages.length
+    ? `## Packages
 
 | Package | Description |
 | ------- | ----------- |
 ${packages.map((pkg) => `| [\`${pkg.name}\`](./${pkg.directory}) | ${pkg.description ?? ''} |`).join('\n')}
 
-## Contributors
+`
+    : ''
+}## Contributors
 
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->

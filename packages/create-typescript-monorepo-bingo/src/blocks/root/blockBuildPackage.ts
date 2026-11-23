@@ -19,6 +19,7 @@ import {
   usesTaskRunner,
 } from '../../utils/options.ts';
 import { pin } from '../../utils/pins.ts';
+import { getMinimumVersion } from '../../utils/versions.ts';
 import { blockGitHubActionsCI } from './blockGitHubActionsCI.ts';
 import { blockGitignore } from './blockGitignore.ts';
 import { blockKnip } from './blockKnip.ts';
@@ -96,7 +97,7 @@ export const blockBuildPackage = rootBase.createBlock({
   about: {
     name: 'Build Package',
   },
-  intake({ files }) {
+  intake({ files, options }) {
     const existing = Object.fromEntries(
       Object.entries({
         packageJson: readText(files, 'packages/build/package.json'),
@@ -115,6 +116,7 @@ export const blockBuildPackage = rootBase.createBlock({
       .find((specifier) => specifier !== undefined);
     const rootScripts = (rootManifest.scripts ?? {}) as Partial<Record<string, string>>;
     const rootBuild = rootScripts.build;
+    const workspaceText = readText(files, 'pnpm-workspace.yaml');
     const rootTypeScript = [rootManifest.devDependencies, rootManifest.dependencies]
       .map((dependencies) => (dependencies as Record<string, string> | undefined)?.typescript)
       .find((specifier) => specifier !== undefined);
@@ -127,8 +129,24 @@ export const blockBuildPackage = rootBase.createBlock({
       ) && { rootRunsTsc: true }),
       ...(rootScripts.typecheck !== undefined && { rootHasTypecheck: true }),
       ...(rootTypeScript && { rootTypeScript }),
+      ...(rootTypeScript && {
+        rootTypeScriptMajor: getMinimumVersion('typescript', rootTypeScript, workspaceText)?.major,
+      }),
       ...(rootBuild !== undefined && { rootBuild }),
       ...(rootTsdownSpecifier && { rootTsdownSpecifier }),
+      ...(rootTsdownSpecifier && {
+        rootTsdownMinimum: getMinimumVersion('tsdown', rootTsdownSpecifier, workspaceText)?.version,
+      }),
+      // Libraries' own tsdown, which the build package's base may be too new for.
+      olderLibraryTsdown: (options.packages ?? [])
+        .filter((pkg) => {
+          const minimum =
+            pkg.kind === 'library'
+              ? getMinimumVersion('tsdown', pkg.toolDevDependencies?.tsdown, workspaceText)
+              : undefined;
+          return !!minimum && semver.lt(minimum, pin('tsdown'));
+        })
+        .map((pkg) => pkg.directory),
     };
   },
   props: {
@@ -136,6 +154,9 @@ export const blockBuildPackage = rootBase.createBlock({
     rootHasTypecheck: z.boolean().optional(),
     rootRunsTsc: z.boolean().optional(),
     rootTypeScript: z.string().optional(),
+    rootTypeScriptMajor: z.number().optional(),
+    olderLibraryTsdown: z.array(z.string()).optional(),
+    rootTsdownMinimum: z.string().optional(),
     rootTsdownSpecifier: z.string().optional(),
     existing: z
       .object({
@@ -169,14 +190,7 @@ export const blockBuildPackage = rootBase.createBlock({
       (pkg) => pkg.kind === 'library' && pkg.tsdownWorkspaceReady === false,
     );
     const workspaceReady = !unready.length;
-    const olderLibraryTsdown = (options.packages ?? [])
-      .filter((pkg) => {
-        const specifier = pkg.kind === 'library' ? pkg.toolDevDependencies?.tsdown : undefined;
-        const minimum =
-          specifier && semver.validRange(specifier) ? semver.minVersion(specifier) : undefined;
-        return !!minimum && semver.lt(minimum, pin('tsdown'));
-      })
-      .map((pkg) => pkg.directory);
+    const olderLibraryTsdown = props.olderLibraryTsdown ?? [];
     // A root tsdown config only helps when the root build runs tsdown: an existing build,
     // like nx run-many, or a task runner's, builds packages with their own configs.
     const writesRootTsdown =
@@ -236,11 +250,8 @@ export const blockBuildPackage = rootBase.createBlock({
     const typescript7Alias = getTypeScript7Alias(options);
     // TypeScript 7's alias would take over the tsc bin from a root TypeScript older than 6,
     // which, unlike TypeScript 6's, ships its own.
-    const rootTypeScriptMinimum =
-      props.rootTypeScript && semver.validRange(props.rootTypeScript)
-        ? semver.minVersion(props.rootTypeScript)
-        : undefined;
-    const addsTypeScript7 = !rootTypeScriptMinimum || rootTypeScriptMinimum.major >= 6;
+    const addsTypeScript7 =
+      props.rootTypeScriptMajor === undefined || props.rootTypeScriptMajor >= 6;
     // Knip only sees the alias used through a root script that runs tsc.
     const typescript7Unseen =
       addsTypeScript7 &&
@@ -256,11 +267,20 @@ export const blockBuildPackage = rootBase.createBlock({
               `The root's TypeScript ${props.rootTypeScript ?? ''} is older than 6, so CTM didn't add TypeScript 7 as ${typescript7Alias}, whose tsc would replace it. Update to TypeScript 6 and re-run to type check with both.`,
             ]),
         // An existing tsdown is kept, but packages' configs spread a base typed for CTM's.
-        ...(props.rootTsdownSpecifier &&
-        semver.validRange(props.rootTsdownSpecifier) &&
-        semver.lt(semver.minVersion(props.rootTsdownSpecifier) ?? pin('tsdown'), pin('tsdown'))
+        ...(props.rootTsdownMinimum && semver.lt(props.rootTsdownMinimum, pin('tsdown'))
           ? [
-              `The root's tsdown ${props.rootTsdownSpecifier} allows versions older than the ${pin('tsdown')} the build package's tsdown base is written for. Update it to ^${pin('tsdown')}, so packages build and typecheck with one tsdown.`,
+              `The root's tsdown ${props.rootTsdownSpecifier ?? props.rootTsdownMinimum} allows versions older than the ${pin('tsdown')} the build package's tsdown base is written for. Update it to ^${pin('tsdown')}, so packages build and typecheck with one tsdown.`,
+            ]
+          : []),
+        // A root build that neither runs tsdown nor each package's build skips CTM's packages.
+        ...(props.rootBuild !== undefined &&
+        !writesRootTsdown &&
+        !usesTaskRunner(options) &&
+        !/\btsdown\b|\b(?:turbo|nx|lerna)\b|--recursive|--filter|(?:^|\s)-[rF]\b/.test(
+          props.rootBuild,
+        )
+          ? [
+              `The root build script, \`${props.rootBuild}\`, doesn't run tsdown or each package's build, so packages built with tsdown, like new ones, aren't built by it. Add \`pnpm --recursive run build\` to it, or run tsdown with the build package's base.`,
             ]
           : []),
         ...(olderLibraryTsdown.length

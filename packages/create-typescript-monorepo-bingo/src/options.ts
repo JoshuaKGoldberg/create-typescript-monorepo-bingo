@@ -130,6 +130,14 @@ export const rootOptionsShape = {
     .string()
     .optional()
     .describe('dependency name that aliases TypeScript 7 for the tsc binary'),
+  packagesExportBuildOutput: z
+    .boolean()
+    .optional()
+    .describe("inferred: packages' exports point at build output, which typed linting needs"),
+  packagesRunVitest: z
+    .boolean()
+    .optional()
+    .describe('inferred: packages run Vitest themselves, which a root config would take over'),
   vitestConfigUnowned: z
     .boolean()
     .optional()

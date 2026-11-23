@@ -1274,6 +1274,209 @@ describe('round 11 regressions', () => {
   });
 });
 
+describe('round 15 adoption regressions', () => {
+  const editJson = (
+    files: IntakeDirectory,
+    path: string,
+    edit: (json: Record<string, unknown>) => void,
+  ) => {
+    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
+    edit(json);
+    setFile(files, path, JSON.stringify(json, null, 2));
+  };
+  const prepare = (files: IntakeDirectory) =>
+    prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never });
+
+  it("doesn't add a root Vitest config packages running Vitest themselves would pick up", () => {
+    const files = createRepository({ taskRunner: 'turbo' });
+    delete (files as Record<string, unknown>)['vitest.config.ts'];
+    editJson(files, 'packages/example/package.json', (manifest) => {
+      (manifest.scripts as Record<string, string>).test = 'vitest run';
+    });
+
+    const creation = transition(files, { newPackage: 'second' });
+
+    expect(prepare(files).packagesRunVitest).toBe(true);
+    expect(getFile(creation.files, 'vitest.config.ts')).toBeUndefined();
+    expect(getFile(creation.files, 'packages/second/package.json')).toContain(
+      '"test": "vitest run"',
+    );
+  });
+
+  it('formats a repository adopting Oxfmt in full, once', () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['oxfmt.config.ts'];
+
+    expect(JSON.stringify(transition(files).scripts)).toContain('"pnpm exec oxfmt"');
+  });
+
+  it('turns off package.json order rules for unsorted manifests', () => {
+    const files = createRepository();
+    editJson(files, 'package.json', (manifest) => {
+      manifest.scripts = { test: 'vitest', build: 'tsdown' };
+    });
+
+    const config = getFile(transition(files).files, 'eslint.config.ts');
+
+    expect(config).toContain("'package-json/order-properties': 'off'");
+    expect(config).toContain("'package-json/sort-collections': 'off'");
+  });
+
+  it('builds before linting when packages export build output', () => {
+    const files = createRepository();
+    editJson(files, 'packages/example/package.json', (manifest) => {
+      manifest.exports = { '.': './dist/index.mjs' };
+    });
+    // An existing Lint job is the repository's: this one is new.
+    delete ((files['.github'] as IntakeDirectory).workflows as Record<string, unknown>)['ci.yaml'];
+
+    expect(prepare(files).packagesExportBuildOutput).toBe(true);
+    expect(getFile(transition(files).files, '.github/workflows/ci.yaml')).toMatch(
+      /lint:[\s\S]*?pnpm build[\s\S]*?pnpm lint/,
+    );
+  });
+
+  it("builds a site's workspace dependencies first", () => {
+    const files = createRepository();
+    setFile(
+      files,
+      'packages/site/package.json',
+      JSON.stringify({
+        dependencies: { astro: '^5.0.0' },
+        name: 'site',
+        scripts: { build: 'astro build' },
+      }),
+    );
+    setFile(files, 'packages/site/astro.config.ts', 'export default {};\n');
+
+    expect(getFile(transition(files).files, '.github/workflows/ci.yaml')).toContain(
+      'pnpm --filter=site... build',
+    );
+  });
+
+  it("suggests a root build that doesn't build tsdown packages include them", () => {
+    const files = createRepository();
+    editJson(files, 'package.json', (manifest) => {
+      (manifest.scripts as Record<string, string>).build = 'tsc -b';
+    });
+
+    expect(transition(files).suggestions).toContainEqual(expect.stringContaining('`tsc -b`'));
+  });
+
+  it("keeps a CI lint job for a repository's own ESLint config", () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['eslint.config.ts'];
+    setFile(files, 'eslint.config.js', 'export default [];\n');
+
+    expect(getFile(transition(files).files, '.github/workflows/ci.yaml')).toContain('pnpm lint');
+  });
+});
+
+describe('round 15 regressions', () => {
+  const editJson = (
+    files: IntakeDirectory,
+    path: string,
+    edit: (json: Record<string, unknown>) => void,
+  ) => {
+    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
+    edit(json);
+    setFile(files, path, JSON.stringify(json, null, 2));
+  };
+
+  it("keeps a repository's own package.json entry next to CTM's missing-fields entry", () => {
+    const files = createRepository();
+    const own = `{
+    files: ['**/package.json'],
+    rules: { 'package-json/require-engines': 'error' },
+  }`;
+    setFile(
+      files,
+      'eslint.config.ts',
+      (getFile(files, 'eslint.config.ts') ?? '').replace(/\n\);\n$/, `\n  ${own},\n);\n`),
+    );
+    const originalManifest = getFile(files, 'packages/example/package.json') ?? '';
+    editJson(files, 'packages/example/package.json', (manifest) => {
+      delete manifest.sideEffects;
+    });
+
+    applyFiles(files, transition(files).files);
+    const config = getFile(files, 'eslint.config.ts') ?? '';
+
+    expect(config).toContain(own);
+    expect(config).toContain("'package-json/require-sideEffects': 'off'");
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+
+    // Once the field is filled in, CTM's entry goes away and the repository's stays.
+    setFile(files, 'packages/example/package.json', originalManifest);
+    applyFiles(files, transition(files).files);
+
+    expect(getFile(files, 'eslint.config.ts')).not.toContain('missing-package-fields');
+    expect(getFile(files, 'eslint.config.ts')).toContain(own);
+  });
+
+  it('reads TypeScript and ESLint versions through catalogs and npm aliases', () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['eslint.config.ts'];
+    editJson(files, 'package.json', (manifest) => {
+      const devDependencies = manifest.devDependencies as Record<string, string>;
+      devDependencies.typescript = 'npm:typescript@^5.9.3';
+      devDependencies.eslint = 'catalog:';
+      delete devDependencies.typescript7;
+    });
+    setFile(
+      files,
+      'pnpm-workspace.yaml',
+      "packages:\n  - 'packages/*'\ncatalog:\n  eslint: ^8.57.0\n",
+    );
+
+    const creation = transition(files);
+
+    expect(getFile(creation.files, 'package.json')).not.toContain('"typescript7"');
+    expect(getFile(creation.files, 'eslint.config.ts')).toBeUndefined();
+  });
+
+  it('adds the ESM module pair only when the root tsconfig sets neither', () => {
+    const files = createRepository();
+    editJson(files, 'package.json', (manifest) => {
+      delete manifest.type;
+    });
+    editJson(files, 'tsconfig.json', (tsconfig) => {
+      tsconfig.compilerOptions = {
+        ...(tsconfig.compilerOptions as object),
+        module: 'NodeNext',
+      };
+    });
+
+    const creation = transition(files);
+
+    expect(getFile(creation.files, 'tsconfig.json')).not.toContain('bundler');
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('"module": "preserve"'));
+  });
+
+  it('formats with Prettier where Biome only lints', () => {
+    const files = createRepository({ formatter: 'prettier' });
+    setFile(files, 'biome.json', '{ "formatter": { "enabled": false } }\n');
+    editJson(files, 'package.json', (manifest) => {
+      (manifest.devDependencies as Record<string, string>)['@biomejs/biome'] = '^2.0.0';
+    });
+
+    expect(
+      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).formatter,
+    ).toBe('prettier');
+  });
+
+  it('refuses Biome as the formatter of a new repository', () => {
+    expect(() => createRepository({ formatter: 'biome' })).toThrow('--formatter biome');
+  });
+
+  it('adds config globs when an include covers only some root config files', () => {
+    const files = createRepository();
+    setFile(files, 'tsconfig.json', '{ "include": ["eslint.config.ts", "scripts"] }\n');
+
+    expect(getFile(transition(files).files, 'tsconfig.json')).toContain('"./*.config.ts"');
+  });
+});
+
 describe('round 14 adoption regressions', () => {
   const editJson = (
     files: IntakeDirectory,

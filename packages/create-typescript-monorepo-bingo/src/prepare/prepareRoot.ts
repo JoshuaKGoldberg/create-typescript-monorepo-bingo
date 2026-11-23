@@ -17,12 +17,15 @@ export interface PackageManifest {
   description?: string;
   devDependencies?: Record<string, string>;
   engines?: { node?: string };
+  exports?: unknown;
   homepage?: string;
+  main?: unknown;
   name?: string;
   packageManager?: string;
   private?: boolean;
   repository?: string | { url?: string };
   scripts?: Record<string, string>;
+  types?: unknown;
 }
 
 export interface WorkspacePackage {
@@ -101,6 +104,17 @@ export function prepareRoot(
     ...inferTypeScript7Alias(rootManifest, workspace),
     ...inferFormatter(files, rootManifest),
     ...inferVitestConfig(files),
+    // Packages importing each other through exports like ./dist/index.mjs need a build
+    // before their imports have types.
+    ...(workspacePackages.some((pkg) =>
+      /(?:^|["/])(?:dist|lib|build|out)\//.test(
+        JSON.stringify([pkg.manifest.exports, pkg.manifest.main, pkg.manifest.types]),
+      ),
+    ) &&
+      rootManifest?.scripts?.build !== undefined && { packagesExportBuildOutput: true }),
+    ...(inferVitestConfig(files).vitestConfig === undefined &&
+      readText(files, 'vitest.config.ts') === undefined &&
+      workspacePackages.some(runsVitestWithoutConfig) && { packagesRunVitest: true }),
     ...inferTestRunner(files, rootManifest, workspacePackages),
     ...inferWorkflowExtension(files),
   };
@@ -642,24 +656,42 @@ function inferFormatter(
     !!record?.prettier ||
     prettierConfigs.some((name) => getEntry(files, name));
 
-  // Biome formats and sorts imports itself, so CTM formats its files with Biome instead.
-  const usesBiome =
-    '@biomejs/biome' in dependencies ||
-    !!getEntry(files, 'biome.json') ||
-    !!getEntry(files, 'biome.jsonc');
+  // Biome formats and sorts imports itself, so CTM formats its files with Biome instead,
+  // unless Biome only lints, as alongside Prettier.
+  const biomeConfig = readText(files, 'biome.json') ?? readText(files, 'biome.jsonc');
+  const formatsWithBiome =
+    ('@biomejs/biome' in dependencies || biomeConfig !== undefined) &&
+    !/"formatter"\s*:\s*\{[^}]*"enabled"\s*:\s*false/.test(biomeConfig ?? '');
 
   return usesOxfmt
     ? {}
-    : usesBiome
-      ? { formatter: 'biome' }
-      : usesPrettier
-        ? { formatter: 'prettier' }
+    : usesPrettier
+      ? { formatter: 'prettier' }
+      : formatsWithBiome
+        ? { formatter: 'biome' }
         : {};
 }
 
 /**
  * Infers the root Vitest config's file name, when it isn't vitest.config.ts.
  */
+
+/**
+ * Whether a package runs Vitest itself, through a script or an nx project.json target,
+ * without a config of its own: Vitest would then find and use a root config instead.
+ */
+function runsVitestWithoutConfig(pkg: WorkspacePackage) {
+  const runs =
+    /\bvitest\b/.test(pkg.manifest.scripts?.test ?? '') ||
+    /\bvitest\b/.test(readText(pkg.files, 'project.json') ?? '');
+  const hasConfig = ['vitest', 'vite'].some((tool) =>
+    ['ts', 'mts', 'cts', 'js', 'mjs', 'cjs'].some((extension) =>
+      getEntry(pkg.files, `${tool}.config.${extension}`),
+    ),
+  );
+  return runs && !hasConfig;
+}
+
 function inferVitestConfig(files: IntakeDirectory): Partial<RootOptions> {
   const name = [
     'vitest.config.mts',

@@ -1,4 +1,5 @@
 import semver from 'semver';
+import { parse as parseYaml } from 'yaml';
 
 const protocolPrefixes = [
   'catalog:',
@@ -132,4 +133,40 @@ function minimumVersion(range: string | undefined) {
   } catch {
     return undefined;
   }
+}
+
+interface WorkspaceCatalogs {
+  catalog?: Record<string, unknown>;
+  catalogs?: Record<string, Record<string, unknown> | undefined>;
+}
+
+/**
+ * Finds the lowest version a dependency's specifier allows, looking through catalog
+ * references in pnpm-workspace.yaml and npm aliases, like npm:typescript@^5.9.3.
+ */
+export function getMinimumVersion(
+  name: string,
+  specifier: string | undefined,
+  workspaceText: string | undefined,
+): semver.SemVer | undefined {
+  if (specifier?.startsWith('catalog:')) {
+    let workspace: undefined | WorkspaceCatalogs;
+    try {
+      workspace = parseYaml(workspaceText ?? '') as undefined | WorkspaceCatalogs;
+    } catch {
+      return undefined;
+    }
+
+    const catalogName = specifier.slice('catalog:'.length) || 'default';
+    const resolved =
+      catalogName === 'default'
+        ? (workspace?.catalog?.[name] ?? workspace?.catalogs?.default?.[name])
+        : workspace?.catalogs?.[catalogName]?.[name];
+    return typeof resolved === 'string' && !resolved.startsWith('catalog:')
+      ? getMinimumVersion(name, resolved, undefined)
+      : undefined;
+  }
+
+  const range = parseNpmAlias(specifier ?? '')?.range ?? specifier;
+  return range && semver.validRange(range) ? (semver.minVersion(range) ?? undefined) : undefined;
 }
