@@ -478,6 +478,15 @@ export function readESLintExtras(
   return { configs, exportComments, header, imports, replacedImports, statements, trailing };
 }
 
+const keyedTypes = new Set([
+  'MethodDefinition',
+  'Property',
+  'PropertyDefinition',
+  'TSEnumMember',
+  'TSMethodSignature',
+  'TSPropertySignature',
+]);
+
 /**
  * Collects the identifiers a node refers to, leaving out property names and object keys,
  * which aren't references, and strings and comments, which aren't in the AST.
@@ -503,7 +512,10 @@ function collectReferences(node: unknown, names: Set<string>): void {
   for (const [key, value] of Object.entries(current)) {
     const isName =
       (key === 'property' && current.type === 'MemberExpression' && !current.computed) ||
-      (key === 'key' && current.type === 'Property' && !current.computed);
+      (key === 'key' && keyedTypes.has(current.type) && !current.computed) ||
+      (key === 'right' && current.type === 'TSQualifiedName') ||
+      // A declared name, like a variable's or a function's, isn't a reference to an import.
+      key === 'id';
     if (!isName) {
       collectReferences(value, names);
     }

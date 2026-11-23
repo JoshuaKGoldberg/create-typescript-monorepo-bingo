@@ -79,7 +79,7 @@ export const blockTransitions = rootBase.createBlock({
               with: {
                 branch: 'create-typescript-monorepo-bingo/transition',
                 'commit-message': 'chore: transition with create-typescript-monorepo-bingo',
-                body: 'This PR was created by the weekly transition with [create-typescript-monorepo-bingo](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo).',
+                body: 'This PR was created by the weekly transition with [`create-typescript-monorepo-bingo`](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo).',
                 'delete-branch': true,
                 title: 'chore: transition with create-typescript-monorepo-bingo',
                 token: '${{ steps.create_token.outputs.token }}',

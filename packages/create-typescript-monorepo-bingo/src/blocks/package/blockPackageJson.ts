@@ -109,7 +109,7 @@ export const blockPackageJson = packageBase.createBlock({
     // A test script just as CTM writes it is CTM's: its project name follows the Vitest
     // config's, which changes as packages with the same folder name come and go.
     const scripts =
-      test && merged?.test !== undefined && ctmTestScript.test(merged.test)
+      test && merged?.test !== undefined && isCTMTestScript(merged.test, test)
         ? { ...merged, test }
         : merged;
 
@@ -208,7 +208,13 @@ function getSiblingToolDependencies(options: RootOptions, pkg: PackageSpec) {
   );
 }
 
-const ctmTestScript = /^vitest run --config (?:\.\.\/)+vitest\.config\.ts --project \S+$/;
+/**
+ * Whether a test script is the one CTM writes for a package, apart from its project name.
+ */
+function isCTMTestScript(script: string, ours: string) {
+  const withoutProject = (text: string) => text.replace(/ --project \S+$/, '');
+  return /--project \S+$/.test(script) && withoutProject(script) === withoutProject(ours);
+}
 
 /**
  * Finds a homepage that every other library package shares, like a project website.

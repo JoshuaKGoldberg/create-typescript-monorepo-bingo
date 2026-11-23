@@ -1273,6 +1273,55 @@ describe('round 11 regressions', () => {
   });
 });
 
+describe('round 13 regressions', () => {
+  it('has Knip ignore root build tools packages only use indirectly', () => {
+    const files = createRepository({ taskRunner: 'turbo' });
+    const pkg = JSON.parse(getFile(files, 'packages/example/package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+    };
+    pkg.devDependencies.tsdown = '^0.23.7';
+    setFile(files, 'packages/example/package.json', JSON.stringify(pkg, null, 2));
+
+    applyFiles(files, transition(files).files);
+    const knip = getFile(files, 'knip.config.ts') ?? '';
+
+    for (const dependency of ['@arethetypeswrong/core', 'publint', 'tsdown']) {
+      expect(knip).toContain(`'${dependency}'`);
+    }
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it('keeps a test script pointing at a different Vitest config', () => {
+    const files = createRepository({ taskRunner: 'turbo' });
+    const pkg = JSON.parse(getFile(files, 'packages/example/package.json') ?? '{}') as {
+      scripts: Record<string, string>;
+    };
+    pkg.scripts.test = 'vitest run --config ../vitest.config.ts --project unit';
+    setFile(files, 'packages/example/package.json', JSON.stringify(pkg, null, 2));
+
+    expect(getFile(transition(files).files, 'packages/example/package.json')).toContain(
+      'vitest run --config ../vitest.config.ts --project unit',
+    );
+  });
+
+  it('drops the Vitest import when kept code only declares or keys that name', () => {
+    const files = createRepository();
+    setFile(
+      files,
+      'eslint.config.ts',
+      (getFile(files, 'eslint.config.ts') ?? '').replace(
+        'export default defineConfig(',
+        'class Settings {\n  vitest = 1;\n}\n\nexport const settings = new Settings();\n\nexport default defineConfig(',
+      ),
+    );
+
+    const config = getFile(transition(files, { testRunner: 'other' }).files, 'eslint.config.ts');
+
+    expect(config).toContain('vitest = 1;');
+    expect(config).not.toContain('@vitest/eslint-plugin');
+  });
+});
+
 describe('round 12 regressions', () => {
   it('gives a new package the tsdown and vitest devDependencies most siblings declare', () => {
     const files = createRepository();

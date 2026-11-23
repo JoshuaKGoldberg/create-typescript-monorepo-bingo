@@ -21,6 +21,7 @@ import {
 import { pin } from '../../utils/pins.ts';
 import { blockGitHubActionsCI } from './blockGitHubActionsCI.ts';
 import { blockGitignore } from './blockGitignore.ts';
+import { blockKnip } from './blockKnip.ts';
 import { blockPnpmWorkspace } from './blockPnpmWorkspace.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 import { blockRootTSConfig } from './blockRootTSConfig.ts';
@@ -161,6 +162,14 @@ export const blockBuildPackage = rootBase.createBlock({
       workspaceReady &&
       !usesTaskRunner(options) &&
       (props.rootBuild === undefined || /\btsdown\b/.test(props.rootBuild));
+    // Libraries that mostly declare their own tsdown, as new ones then do too, build with it
+    // when the root doesn't run tsdown: the root's tsdown, and the attw and publint that
+    // packages' tsdown finds from the root, are then only used indirectly.
+    const libraries = (options.packages ?? []).filter((pkg) => pkg.kind === 'library');
+    const rootToolsIndirect =
+      existingTexts.rootTsdown === undefined &&
+      !writesRootTsdown &&
+      libraries.filter((pkg) => pkg.toolDevDependencies?.tsdown).length * 2 > libraries.length;
     // The root depends on the build package only when something there uses it.
     const rootUsesBuildPackage =
       existingTexts.rootTSConfig === undefined ||
@@ -229,6 +238,16 @@ export const blockBuildPackage = rootBase.createBlock({
           ],
         }),
         blockGitignore({ ignores: ['dist/', 'lib/'] }),
+        ...(rootToolsIndirect
+          ? [
+              blockKnip({
+                ignoreDependencies: [
+                  ...(ownsBase ? ['@arethetypeswrong/core', 'publint'] : []),
+                  'tsdown',
+                ],
+              }),
+            ]
+          : []),
         blockPnpmWorkspace({
           catalogEntries,
           packages: ['packages/build'],
