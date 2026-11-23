@@ -99,9 +99,31 @@ describe(resolveSpecifier, () => {
     expect(resolveSpecifier('^5.1.1', '5.1.1')).toBe('^5.1.1');
   });
 
-  it('keeps an unparseable specifier rather than guessing', () => {
-    expect(resolveSpecifier('latest', '5.1.1')).toBe('5.1.1');
+  it('keeps a dist-tag rather than guessing', () => {
+    expect(resolveSpecifier('latest', '5.1.1')).toBe('latest');
   });
+
+  it('keeps a range that already allows our version', () => {
+    expect(resolveSpecifier('^5.0.0 || ^6.0.0', '5.1.1')).toBe('^5.0.0 || ^6.0.0');
+    expect(resolveSpecifier('*', '5.1.1')).toBe('*');
+  });
+
+  it('keeps a range that starts above our version', () => {
+    expect(resolveSpecifier('^8.0.0', '5.1.1')).toBe('^8.0.0');
+  });
+
+  it('treats an alias to the dependency itself as a plain range', () => {
+    expect(resolveSpecifier('npm:typescript@^9.0.0', '^5.9.3', 'typescript')).toBe(
+      'npm:typescript@^9.0.0',
+    );
+  });
+
+  it.each(['microsoft/TypeScript#main', 'jsr:@std/x@^9', './vendor/ts.tgz'])(
+    'keeps %s',
+    (specifier) => {
+      expect(resolveSpecifier(specifier, '5.1.1')).toBe(specifier);
+    },
+  );
 });
 
 describe(largerSpecifier, () => {

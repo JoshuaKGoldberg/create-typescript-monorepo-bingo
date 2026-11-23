@@ -66,7 +66,12 @@ export const blockPackageTSConfig = packageBase.createBlock({
     }
 
     return {
-      extensions: [asPackageExtension(blockRootTSConfig({ references: [pkg.directory] }))],
+      // Only new packages are added to the root references: existing ones keep the root
+      // tsconfig's choice, since some repositories leave packages out on purpose.
+      extensions:
+        props.existing === undefined
+          ? [asPackageExtension(blockRootTSConfig({ references: [pkg.directory] }))]
+          : [],
       files: {
         'tsconfig.json': formatJson(
           {

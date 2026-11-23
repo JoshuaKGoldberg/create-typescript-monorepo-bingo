@@ -36,7 +36,8 @@ Add a package to an existing monorepo, with zero hand edits to the root tsconfig
 npx create-typescript-monorepo-bingo --mode transition --newPackage my-lib --newPackageDescription "My library."
 ```
 
-Transitions are designed to be re-run weekly: after the first one, a repository that hasn't drifted gets no changes.
+Transitions are designed to be re-run weekly, and a generated `.github/workflows/transitions.yaml` does that, opening a PR with any changes.
+After the first transition, a repository that hasn't drifted gets no changes.
 
 ## What You Get
 
@@ -51,7 +52,7 @@ Transitions are designed to be re-run weekly: after the first one, a repository 
 - **[Knip](https://knip.dev)**, **[CSpell](https://cspell.org)** and `pnpm dedupe --check`
 - **GitHub Actions CI**: Node.js version and OS matrices, plus a job for each check
 - **[Changesets](https://github.com/changesets/changesets) releases** with independent versions, a GitHub App token, and npm trusted publishing
-- **Renovate**, **OctoGuide**, **All Contributors**, VS Code settings, and contributor docs
+- **Renovate**, **OctoGuide**, **All Contributors**, VS Code settings (with TypeScript 6's language service), and contributor docs
 
 ### Task Runners
 
@@ -108,8 +109,26 @@ CTM is a Bingo template built on [Stratum](https://create.bingo/engines/stratum/
 Each library package is produced separately, then nested under its directory.
 Whatever a package contributes to root files, such as its tsconfig reference or catalog entries, is forwarded into one final root production.
 
-Every Block that owns an existing file round-trips it: unknown keys, comments and formatting are kept, and versions are never downgraded below what the repository already has.
-Repository-owned files, such as docs, a docs site's package, and anything CTM doesn't know about, are left alone.
+### What Transitions Keep
+
+Versions are never downgraded below what a repository already has, and ranges that already allow CTM's version are left as they are.
+Beyond that, each file is handled one of three ways:
+
+- **Merged:** `package.json` files, tsconfigs, `pnpm-workspace.yaml`, workflows, VS Code settings, `cspell.json`, Renovate, Changesets and All Contributors configs.
+  CTM updates the keys it manages and keeps everything else: unknown keys, scripts, dependencies, jobs and steps, comments (including in JSONC files), and formatting.
+- **Generated, with additions kept:** `eslint.config.ts` is CTM's config plus any config entries and imports you add after it; edits inside CTM's own entries are replaced.
+  `knip.config.ts` and `oxfmt.config.ts` are rewritten while they're plain static objects without comments, and left alone otherwise.
+- **Owned:** the shared `packages/build` configs and `vitest.config.ts` are CTM's, and are how config stays in sync across repositories.
+- **Repository-owned:** docs, README files, starter sources, a docs site package, and anything CTM doesn't know about are created when missing and never touched again.
+
+To override inferred options, such as a package's `kind`, add a `create-typescript-monorepo-bingo.config.ts` that default-exports `createConfig({ options: { ... } })`.
+
+### Limitations
+
+- Workspace globs must be single-level (`packages/*`) or exact directories.
+- Packages that aren't built with tsdown are detected as repository-owned and left alone.
+- In named catalog mode, dependencies with different versions across packages stay out of catalogs, with a suggestion printed; stray default-catalog entries are kept as they are.
+- Lists in merged YAML files are combined, so a matrix entry or branch CTM no longer produces stays until removed by hand.
 
 ## Development
 

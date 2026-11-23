@@ -76,7 +76,7 @@ export const blockPackageJson = packageBase.createBlock({
       ? {
           ...existingScripts,
           build: 'tsdown',
-          test: `vitest run --config ../../vitest.config.ts --project ${pkg.directory.split('/').pop() ?? pkg.name}`,
+          test: `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${pkg.directory.split('/').pop() ?? pkg.name}`,
         }
       : existingScripts;
 
@@ -110,10 +110,7 @@ export const blockPackageJson = packageBase.createBlock({
       ...base,
       name: pkg.name,
       repository: {
-        ...((base.repository as object | undefined) ?? {
-          type: 'git',
-          url: getRepositoryUrl(options),
-        }),
+        ...toRepositoryObject(base.repository, getRepositoryUrl(options)),
         directory: pkg.directory,
       },
       ...resolved,
@@ -134,3 +131,17 @@ export const blockPackageJson = packageBase.createBlock({
     };
   },
 });
+
+/**
+ * Normalizes a package.json `repository`, which may be a string shorthand,
+ * to an object that can hold a `directory`.
+ */
+function toRepositoryObject(repository: unknown, fallbackUrl: string): Record<string, unknown> {
+  if (typeof repository === 'string') {
+    return { type: 'git', url: repository };
+  }
+
+  return repository && typeof repository === 'object'
+    ? (repository as Record<string, unknown>)
+    : { type: 'git', url: fallbackUrl };
+}

@@ -1,5 +1,6 @@
 import { rootBase } from '../../bases/rootBase.ts';
 import { formatJson } from '../../utils/json.ts';
+import { getPackageParents } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import { blockGitignore } from './blockGitignore.ts';
 import { blockPnpmWorkspace } from './blockPnpmWorkspace.ts';
@@ -20,6 +21,10 @@ export const blockPnpmTasks = rootBase.createBlock({
       return {};
     }
 
+    const filters = getPackageParents(options)
+      .map((parent) => `--filter "./${parent}/*"`)
+      .join(' ');
+
     return {
       extensions: [
         blockPnpmWorkspace({
@@ -27,8 +32,8 @@ export const blockPnpmTasks = rootBase.createBlock({
         }),
         blockRootPackageJson({
           scripts: {
-            build: 'pnpm --recursive --filter "./packages/*" run build',
-            test: 'pnpm --recursive --filter "./packages/*" run test',
+            build: `pnpm --recursive ${filters} run build`,
+            test: `pnpm --recursive ${filters} run test`,
           },
         }),
       ],

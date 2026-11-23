@@ -24,6 +24,7 @@ export { blockRootPackageJson } from './blocks/root/blockRootPackageJson.ts';
 export { blockRootTSConfig } from './blocks/root/blockRootTSConfig.ts';
 export { blockSite } from './blocks/root/blockSite.ts';
 export { blockNx, blockPnpmTasks, blockTurborepo } from './blocks/root/blockTaskRunners.ts';
+export { blockTransitions } from './blocks/root/blockTransitions.ts';
 export { blockVitest } from './blocks/root/blockVitest.ts';
 export { blockVSCode } from './blocks/root/blockVSCode.ts';
 export {
@@ -36,5 +37,5 @@ export {
 } from './options.ts';
 export { packagePreset, rootPreset } from './presets.ts';
 export { produceMonorepo } from './production/produceMonorepo.ts';
-export { template } from './template.ts';
+export { createConfig, template } from './template.ts';
 export { isProtocolSpecifier, parseNpmAlias, resolveSpecifier } from './utils/versions.ts';

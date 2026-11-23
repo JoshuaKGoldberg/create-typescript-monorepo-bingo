@@ -82,17 +82,24 @@ export function produceMonorepo({
 export function normalizeOptions(options: RootOptions): RootOptions {
   const packages: PackageSpec[] = [...(options.packages ?? [])];
 
-  if (!packages.some((pkg) => pkg.kind === 'library') && !options.newPackage) {
+  // prepare() always infers packages from an existing repository, so only a new one,
+  // with no packages option at all, gets a first package named after it.
+  if (options.packages === undefined && !options.newPackage) {
     packages.push(createNewPackage(options.repository, options.description));
   }
 
   if (options.newPackage && !packages.some((pkg) => pkg.name === options.newPackage)) {
-    packages.push(
-      createNewPackage(
-        options.newPackage,
-        options.newPackageDescription ?? `The ${options.newPackage} package in ${options.title}.`,
-      ),
+    const created = createNewPackage(
+      options.newPackage,
+      options.newPackageDescription ?? `The ${options.newPackage} package in ${options.title}.`,
     );
+    const collision = packages.find((pkg) => pkg.directory === created.directory);
+    if (collision) {
+      throw new Error(
+        `Can't add --newPackage ${options.newPackage}: ${created.directory} already holds ${collision.name}.`,
+      );
+    }
+    packages.push(created);
   }
 
   if (!packages.some((pkg) => pkg.kind === 'build')) {
@@ -104,10 +111,22 @@ export function normalizeOptions(options: RootOptions): RootOptions {
     });
   }
 
-  return { ...options, packages };
+  return {
+    ...options,
+    // A new repository's default catalog holds what CTM itself adds to every manifest.
+    ...(options.catalogs === 'default' &&
+      options.catalogShared === undefined && { catalogShared: ['@types/node'] }),
+    packages,
+  };
 }
 
+const packageNamePattern = /^(?:@[a-z0-9][\w.~-]*\/)?[a-z0-9][\w.~-]*$/;
+
 function createNewPackage(name: string, description: string | undefined): PackageSpec {
+  if (!packageNamePattern.test(name) || name.length > 214 || /[A-Z]/.test(name)) {
+    throw new Error(`'${name}' isn't a valid npm package name.`);
+  }
+
   return {
     ...(description && { description }),
     directory: `packages/${name.replace(/^@[^/]+\//, '')}`,

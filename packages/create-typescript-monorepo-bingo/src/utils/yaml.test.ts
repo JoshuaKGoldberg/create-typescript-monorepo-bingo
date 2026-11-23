@@ -45,7 +45,7 @@ jobs:
 `);
   });
 
-  it('removes keys that are no longer there and adds new ones in sorted position', () => {
+  it('keeps keys it does not produce and adds new ones in sorted position', () => {
     const existing = `jobs:
   a:
     name: A
@@ -55,6 +55,9 @@ jobs:
 `;
 
     expect(formatYamlFile({ jobs: { b: { name: 'B' }, c: { name: 'C' } } }, existing)).toBe(`jobs:
+  a:
+    name: A
+
   b:
     name: B
 
@@ -75,5 +78,36 @@ jobs:
     expect(formatYamlFile({ jobs: { lint: { name: 'Lint' } } }, existing, { workflow: true })).toBe(
       existing,
     );
+  });
+
+  it('keeps hand-added keys and steps in jobs it produces', () => {
+    const existing = `concurrency: ci
+
+jobs:
+  build:
+    timeout-minutes: 10
+    steps:
+      - uses: $/.github/actions/setup
+      - run: echo custom
+      - run: pnpm build
+`;
+
+    expect(
+      formatYamlFile(
+        {
+          jobs: {
+            build: { steps: [{ uses: '$/.github/actions/setup' }, { run: 'pnpm build' }] },
+          },
+        },
+        existing,
+        { workflow: true },
+      ),
+    ).toBe(existing);
+  });
+
+  it('unions scalar sequences', () => {
+    expect(
+      formatYamlFile({ branches: ['main', 'next'] }, 'branches:\n  - main\n  - release\n'),
+    ).toBe('branches:\n  - main\n  - release\n  - next\n');
   });
 });

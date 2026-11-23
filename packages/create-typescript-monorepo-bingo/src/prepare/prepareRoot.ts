@@ -6,7 +6,7 @@ import type { CatalogMode, PackageKind, PackageSpec, RootOptions, TaskRunner } f
 import { type DependencyField, dependencyFields } from '../utils/catalogs.ts';
 import { getDirectory, getEntry, readJson, readText } from '../utils/files.ts';
 import { pin, tryPin } from '../utils/pins.ts';
-import { parseNpmAlias, resolveSpecifier } from '../utils/versions.ts';
+import { isProtocolSpecifier, parseNpmAlias, resolveSpecifier } from '../utils/versions.ts';
 
 export interface PackageManifest {
   author?: string | { email?: string; name?: string };
@@ -64,8 +64,12 @@ export function prepareRoot(
     ...(author?.name && { author: author.name }),
     ...(author?.email && { email: author.email }),
     catalogs,
-    ...(catalogs === 'default' && { catalogShared: findSharedDependencies(manifests) }),
-    ...(catalogs === 'named' && { catalogExcluded: findNamedConflicts(manifests) }),
+    ...(catalogs === 'default' && {
+      catalogShared: findSharedDependencies(manifests, workspace?.catalog),
+    }),
+    ...(catalogs === 'named' && {
+      catalogExcluded: findNamedConflicts(manifests, workspace?.catalogs),
+    }),
     ...(rootManifest?.description && { description: rootManifest.description }),
     ...(readText(files, '.nvmrc') && { node: readText(files, '.nvmrc')?.trim() }),
     ...(rootManifest?.engines?.node && { nodeEngines: rootManifest.engines.node }),
@@ -112,6 +116,11 @@ export function findWorkspacePackages(
   globs: string[],
 ): WorkspacePackage[] {
   const found: WorkspacePackage[] = [];
+  const excluded = new Set(
+    globs
+      .filter((glob) => glob.startsWith('!'))
+      .map((glob) => glob.slice(1).replace(/^\.\//, '').replace(/\/$/, '')),
+  );
 
   for (const glob of globs) {
     if (glob.startsWith('!')) {
@@ -128,13 +137,22 @@ export function findWorkspacePackages(
     for (const directory of candidates) {
       const packageFiles = getDirectory(files as IntakeDirectory, directory);
       const manifest = readJson(packageFiles, 'package.json') as PackageManifest | undefined;
-      if (packageFiles && manifest) {
+      if (packageFiles && manifest && !isExcluded(directory, excluded)) {
         found.push({ directory, files: packageFiles, manifest });
       }
     }
   }
 
   return found;
+}
+
+function isExcluded(directory: string, excluded: Set<string>) {
+  return [...excluded].some((pattern) =>
+    pattern.endsWith('/*')
+      ? directory.startsWith(pattern.slice(0, -1)) &&
+        !directory.slice(pattern.length - 1).includes('/')
+      : directory === pattern,
+  );
 }
 
 /**
@@ -207,18 +225,28 @@ interface ManifestWithKind {
   manifest: PackageManifest;
 }
 
-const isLiteral = (specifier: string) =>
-  !/^(?:catalog|workspace|link|file|git\+|git|github|https?|portal):/.test(specifier);
+const isLiteral = (specifier: string) => !isProtocolSpecifier(specifier);
+
+/**
+ * Gets what a catalog entry on disk will be after CTM applies its pins.
+ */
+function getWrittenCatalogEntry(dependency: string, specifier: string) {
+  const pinned = tryPin(dependency);
+  return pinned ? resolveSpecifier(specifier, pinned, dependency) : specifier;
+}
 
 /**
  * In default catalog mode, finds dependencies that two or more manifests declare,
- * always with the same specifier.
+ * always with the same specifier, which must also match any existing catalog entry.
  */
-export function findSharedDependencies(manifests: ManifestWithKind[]): string[] {
+export function findSharedDependencies(
+  manifests: ManifestWithKind[],
+  catalog: Record<string, string> = {},
+): string[] {
   const declarations = new Map<string, Set<string>>();
   const counts = new Map<string, number>();
 
-  for (const { manifest } of manifests) {
+  for (const { kind, manifest } of manifests) {
     for (const [dependency, specifier] of Object.entries(getAllDependencies(manifest))) {
       if (specifier === 'catalog:' || specifier === 'catalog:default') {
         counts.set(dependency, (counts.get(dependency) ?? 0) + 2);
@@ -229,9 +257,16 @@ export function findSharedDependencies(manifests: ManifestWithKind[]): string[] 
         continue;
       }
 
-      declarations.set(dependency, (declarations.get(dependency) ?? new Set()).add(specifier));
+      const written = getWrittenSpecifier(kind, 'devDependencies', dependency, specifier);
+      declarations.set(dependency, (declarations.get(dependency) ?? new Set()).add(written));
       counts.set(dependency, (counts.get(dependency) ?? 0) + 1);
     }
+  }
+
+  // A literal that differs from the catalog entry is a conflict, not a shared dependency.
+  for (const [dependency, specifier] of Object.entries(catalog)) {
+    const literals = declarations.get(dependency);
+    literals?.add(getWrittenCatalogEntry(dependency, specifier));
   }
 
   return [...counts]
@@ -250,7 +285,10 @@ const namedCatalogs: Partial<Record<DependencyField, string>> = {
  * In named catalog mode, finds `&lt;catalog>:&lt;dependency>` pairs that manifests declare
  * with different specifiers. Those stay uncataloged rather than being forced to one version.
  */
-export function findNamedConflicts(manifests: ManifestWithKind[]): string[] {
+export function findNamedConflicts(
+  manifests: ManifestWithKind[],
+  catalogs: Record<string, Record<string, string>> = {},
+): string[] {
   const specifiers = new Map<string, Set<string>>();
 
   for (const { kind, manifest } of manifests) {
@@ -272,6 +310,15 @@ export function findNamedConflicts(manifests: ManifestWithKind[]): string[] {
         const key = `${catalog}:${dependency}`;
         specifiers.set(key, (specifiers.get(key) ?? new Set()).add(specifier));
       }
+    }
+  }
+
+  // A literal that differs from the existing catalog entry is a conflict too.
+  for (const [catalog, entries] of Object.entries(catalogs)) {
+    for (const [dependency, specifier] of Object.entries(entries)) {
+      specifiers
+        .get(`${catalog}:${dependency}`)
+        ?.add(getWrittenCatalogEntry(dependency, specifier));
     }
   }
 
@@ -298,11 +345,11 @@ function getWrittenSpecifier(
         : dependency === 'typescript'
           ? pin('typescript')
           : undefined;
-    return ours ? resolveSpecifier(diskSpecifier, ours) : diskSpecifier;
+    return ours ? resolveSpecifier(diskSpecifier, ours, dependency) : diskSpecifier;
   }
 
   const pinned = kind === 'root' && field === 'devDependencies' ? tryPin(dependency) : undefined;
-  return pinned ? resolveSpecifier(diskSpecifier, pinned) : diskSpecifier;
+  return pinned ? resolveSpecifier(diskSpecifier, pinned, dependency) : diskSpecifier;
 }
 
 function getFirstPerson(manifest: PackageManifest | undefined) {
@@ -321,7 +368,7 @@ function getFirstPerson(manifest: PackageManifest | undefined) {
 
 function parseRepository(repository: PackageManifest['repository']) {
   const url = typeof repository === 'string' ? repository : repository?.url;
-  const match = url && /github\.com[/:]([^/]+)\/([^/.#]+)/.exec(url);
+  const match = url && /github\.com[/:]([^/]+)\/([^/#]+?)(?:\.git)?(?:[/#]|$)/.exec(url);
   return match?.[1] && match[2] ? { owner: match[1], repository: match[2] } : undefined;
 }
 
@@ -371,10 +418,15 @@ function inferWorkflowExtension(files: IntakeDirectory): Partial<RootOptions> {
     return {};
   }
 
-  const names = Object.keys(workflows);
-  if (names.some((name) => name.endsWith('.yml'))) {
-    return { workflowExtension: 'yml' };
+  // Only the workflows CTM writes count: a hand-added deploy.yml shouldn't make CTM
+  // write a second copy of every workflow.
+  for (const name of ['ci', 'release', 'octoguide', 'contributors']) {
+    for (const workflowExtension of ['yaml', 'yml'] as const) {
+      if (getEntry(workflows, `${name}.${workflowExtension}`)) {
+        return { workflowExtension };
+      }
+    }
   }
 
-  return names.some((name) => name.endsWith('.yaml')) ? { workflowExtension: 'yaml' } : {};
+  return {};
 }

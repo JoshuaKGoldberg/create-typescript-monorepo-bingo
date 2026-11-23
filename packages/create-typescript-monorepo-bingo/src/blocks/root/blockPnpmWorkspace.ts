@@ -31,11 +31,15 @@ export const blockPnpmWorkspace = rootBase.createBlock({
     packages: z.array(z.string()).optional(),
     settings: z.record(z.string(), z.unknown()).optional(),
   },
-  produce({ props }) {
+  produce({ options, props }) {
     const document = props.existing ? parseDocument(props.existing) : new Document({});
     if (!isMap(document.contents)) {
       document.contents = document.createNode({});
     }
+
+    // Maps that were sorted (or are new) stay sorted; hand-ordered ones keep their order.
+    const unsortedMaps = new WeakSet();
+    collectUnsortedMaps(document.contents, unsortedMaps);
 
     // Package globs: keep what's there, adding any new ones.
     const existingGlobs = readStrings(document.get('packages'));
@@ -61,10 +65,14 @@ export const blockPnpmWorkspace = rootBase.createBlock({
       );
     }
 
-    sortMaps(document.contents);
+    sortMaps(document.contents, unsortedMaps);
     spaceTopLevel(document);
 
     return {
+      suggestions: (options.catalogExcluded ?? []).map(
+        (excluded) =>
+          `${excluded.replace(':', ' catalog: ')} has different versions across packages, so it's left out of catalogs. Align them to catalog it.`,
+      ),
       files: {
         'pnpm-workspace.yaml': document.toString({ singleQuote: true }),
       },
@@ -91,7 +99,10 @@ export function resolveCatalogEntries(
     combined.set(
       key,
       previous
-        ? { ...entry, specifier: largerSpecifier(previous.specifier, entry.specifier) }
+        ? {
+            ...entry,
+            specifier: largerSpecifier(previous.specifier, entry.specifier, entry.dependency),
+          }
         : entry,
     );
   }
@@ -102,7 +113,7 @@ export function resolveCatalogEntries(
     const existing = result.get(key);
     result.set(key, {
       ...entry,
-      specifier: resolveSpecifier(existing?.specifier, entry.specifier),
+      specifier: resolveSpecifier(existing?.specifier, entry.specifier, entry.dependency),
     });
   }
 
@@ -149,7 +160,20 @@ function readStrings(node: unknown): string[] {
 }
 
 function setDeep(document: Document, path: string[], value: unknown) {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
+  if (Array.isArray(value)) {
+    // Lists like publicHoistPattern keep their existing entries.
+    const existing = readStrings(document.getIn(path));
+    if (value.every((item) => existing.includes(item as string)) && existing.length) {
+      return;
+    }
+    document.setIn(
+      path,
+      document.createNode(mergeList(existing.length ? existing : undefined, value as string[])),
+    );
+    return;
+  }
+
+  if (value && typeof value === 'object') {
     for (const [key, child] of Object.entries(value)) {
       setDeep(document, [...path, key], child);
     }
@@ -158,15 +182,33 @@ function setDeep(document: Document, path: string[], value: unknown) {
   }
 }
 
-function sortMaps(node: unknown) {
+function collectUnsortedMaps(node: unknown, unsorted: WeakSet<object>) {
   if (isMap(node)) {
-    node.items.sort((a, b) => compareKeys(keyText(a.key), keyText(b.key)));
+    const keys = node.items.map((pair) => keyText(pair.key));
+    if (keys.some((key, index) => index > 0 && compareKeys(keys[index - 1] ?? '', key) > 0)) {
+      unsorted.add(node);
+    }
     for (const pair of node.items) {
-      sortMaps(pair.value);
+      collectUnsortedMaps(pair.value, unsorted);
     }
   } else if (isSeq(node)) {
     for (const item of node.items) {
-      sortMaps(item);
+      collectUnsortedMaps(item, unsorted);
+    }
+  }
+}
+
+function sortMaps(node: unknown, unsorted: WeakSet<object>) {
+  if (isMap(node)) {
+    if (!unsorted.has(node)) {
+      node.items.sort((a, b) => compareKeys(keyText(a.key), keyText(b.key)));
+    }
+    for (const pair of node.items) {
+      sortMaps(pair.value, unsorted);
+    }
+  } else if (isSeq(node)) {
+    for (const item of node.items) {
+      sortMaps(item, unsorted);
     }
   }
 }

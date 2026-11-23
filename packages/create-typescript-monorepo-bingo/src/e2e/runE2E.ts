@@ -41,8 +41,11 @@ const newRepository = {
   title: 'Example',
 } satisfies Partial<RootOptions>;
 
+const declarationsCheck = 'declarations have no any';
+
 const allChecks = [
   'pnpm build',
+  declarationsCheck,
   'pnpm typecheck',
   'pnpm lint',
   'pnpm test run',
@@ -211,6 +214,15 @@ async function runScenario(scenario: Scenario): Promise<string[]> {
   git(directory, ['commit', '--allow-empty', '--quiet', '--no-verify', '--message', 'produced']);
 
   for (const check of scenario.checks) {
+    if (check === declarationsCheck) {
+      const leaks = await findAnyInDeclarations(directory);
+      console.log(`  ${leaks.length ? '✗' : '✓'} ${check}`);
+      if (leaks.length) {
+        failures.push(`${check}:\n        ${leaks.join('\n        ')}`);
+      }
+      continue;
+    }
+
     const [command = 'pnpm', ...args] = check.split(' ');
     const result = spawnSync(command, args, { cwd: directory, encoding: 'utf8' });
     const passed = result.status === 0;
@@ -277,6 +289,30 @@ async function produce(directory: string, step: Step) {
     options: prepared as RootOptions,
     skips: { requests: true },
   });
+}
+
+/**
+ * Finds `any` types in built declaration files, which tsdown can emit silently when a
+ * referenced package's types weren't built first.
+ */
+async function findAnyInDeclarations(directory: string) {
+  const leaks: string[] = [];
+
+  for await (const file of fs.glob('*/*/dist/**/*.d.mts', { cwd: directory })) {
+    if (file.includes('node_modules')) {
+      continue;
+    }
+
+    const text = await fs.readFile(path.join(directory, file), 'utf8');
+    for (const [index, line] of text.split('\n').entries()) {
+      const code = line.replace(/\/\/.*$|\/\*.*?\*\//g, '');
+      if (/(?:[:<|&,]|=>)\s*any\b|\bany\s*(?:\[\]|[;,)>|&])/.test(code)) {
+        leaks.push(`${file}:${String(index + 1)}: ${line.trim()}`);
+      }
+    }
+  }
+
+  return leaks;
 }
 
 function git(directory: string, args: string[]) {

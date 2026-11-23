@@ -3,8 +3,10 @@ import { z } from 'zod';
 import { rootBase } from '../../bases/rootBase.ts';
 import { readText } from '../../utils/files.ts';
 import { mergeList } from '../../utils/lists.ts';
+import { getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import {
+  hasComments,
   printStatic,
   readConfigLayout,
   readConfigObject,
@@ -15,14 +17,7 @@ import { blockGitHubActionsCI } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 import { blockVSCode } from './blockVSCode.ts';
 
-const baseIgnorePatterns = [
-  '.all-contributorsrc',
-  '**/CHANGELOG.md',
-  'coverage',
-  'packages/*/dist',
-  'packages/*/lib',
-  'pnpm-lock.yaml',
-];
+const baseIgnorePatterns = ['.all-contributorsrc', '**/CHANGELOG.md', 'coverage', 'pnpm-lock.yaml'];
 
 /**
  * Owns `oxfmt.config.ts` and the Format-phase script that formats every file CTM writes.
@@ -40,8 +35,13 @@ export const blockOxfmt = rootBase.createBlock({
     existing: z.string().optional(),
     ignorePatterns: z.array(z.string()).optional(),
   },
-  produce({ props }) {
+  produce({ options, props }) {
     const existing = readConfigObject(props.existing) ?? {};
+    // A config CTM can't read back statically, or with comments, is the repository's own:
+    // CTM leaves it as it is rather than lose what it can't represent.
+    const keepExisting =
+      props.existing !== undefined &&
+      (!readConfigObject(props.existing) || hasComments(props.existing));
     const existingIgnores = Array.isArray(existing.ignorePatterns)
       ? existing.ignorePatterns.filter((pattern) => typeof pattern === 'string')
       : undefined;
@@ -54,6 +54,8 @@ export const blockOxfmt = rootBase.createBlock({
       ...existing,
       ignorePatterns: mergeList(existingIgnores, [
         ...baseIgnorePatterns,
+        ...getPackageGlobs(options, 'dist'),
+        ...getPackageGlobs(options, 'lib'),
         ...(props.ignorePatterns ?? []),
       ]),
     };
@@ -83,7 +85,10 @@ export const blockOxfmt = rootBase.createBlock({
         }),
       ],
       files: {
-        'oxfmt.config.ts': `import { defineConfig, type OxfmtConfig } from 'oxfmt';
+        'oxfmt.config.ts':
+          keepExisting && props.existing !== undefined
+            ? props.existing
+            : `import { defineConfig, type OxfmtConfig } from 'oxfmt';
 
 const config: OxfmtConfig = defineConfig(${printStatic(sorted, readConfigLayout(props.existing))});
 

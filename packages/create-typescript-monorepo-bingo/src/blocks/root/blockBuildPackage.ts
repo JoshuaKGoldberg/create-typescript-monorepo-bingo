@@ -16,6 +16,7 @@ import { blockGitignore } from './blockGitignore.ts';
 import { blockPnpmWorkspace } from './blockPnpmWorkspace.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 import { blockRootTSConfig } from './blockRootTSConfig.ts';
+import { blockVSCode } from './blockVSCode.ts';
 
 /**
  * TypeScript's API, for typescript-eslint, tsdown's `tsc` declarations and `astro check`.
@@ -155,7 +156,13 @@ export const blockBuildPackage = rootBase.createBlock({
           ],
         }),
         blockGitignore({ ignores: ['dist/', 'lib/'] }),
-        ...(catalogEntries.length ? [blockPnpmWorkspace({ catalogEntries })] : []),
+        blockPnpmWorkspace({
+          catalogEntries,
+          // The typescript alias's own lib/ has no tsserver.js, so editors get TypeScript 6
+          // from the real compiler package it wraps, hoisted to a stable path.
+          settings: { publicHoistPattern: ['@typescript/old'] },
+        }),
+        blockVSCode({ settings: { 'js/ts.tsdk.path': 'node_modules/@typescript/old/lib' } }),
         blockRootPackageJson({
           devDependencies: {
             '@arethetypeswrong/core': pin('@arethetypeswrong/core'),
@@ -171,7 +178,10 @@ export const blockBuildPackage = rootBase.createBlock({
             typecheck: 'tsc -b',
           },
         }),
-        blockRootTSConfig({ references: ['packages/build'] }),
+        // Existing repositories keep their own choice of whether to reference the build package.
+        ...(existingTexts.packageJson === undefined
+          ? [blockRootTSConfig({ references: ['packages/build'] })]
+          : []),
       ],
       files: {
         packages: {

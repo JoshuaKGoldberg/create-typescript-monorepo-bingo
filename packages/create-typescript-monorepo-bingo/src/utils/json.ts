@@ -1,3 +1,6 @@
+import { isDeepStrictEqual } from 'node:util';
+
+import { applyEdits, type JSONPath, modify, parse as parseJsonc } from 'jsonc-parser';
 import { sortPackageJson } from 'sort-package-json';
 
 import { printValue, readJsonLayout } from './print.ts';
@@ -7,7 +10,55 @@ import { printValue, readJsonLayout } from './print.ts';
  * Objects and arrays that exist in `existingText` keep their one-line or multi-line layout.
  */
 export function formatJson(value: unknown, existingText?: string): string {
+  if (existingText !== undefined && !isStrictJson(existingText)) {
+    return editJsonc(existingText, value);
+  }
+
   return `${printValue(value, { layout: readJsonLayout(existingText), style: 'json' })}\n`;
+}
+
+/**
+ * Edits JSONC text (with comments or trailing commas) in place to equal a value,
+ * so comments and formatting outside the changed parts are kept.
+ */
+function editJsonc(text: string, value: unknown): string {
+  let result = text;
+
+  const visit = (path: JSONPath, before: unknown, after: unknown) => {
+    if (isPlainObject(before) && isPlainObject(after)) {
+      for (const key of Object.keys(before)) {
+        if (!(key in after)) {
+          result = applyEdits(result, modify(result, [...path, key], undefined, editOptions));
+        }
+      }
+      for (const [key, child] of Object.entries(after)) {
+        visit([...path, key], before[key], child);
+      }
+      return;
+    }
+
+    if (!isDeepStrictEqual(before, after)) {
+      result = applyEdits(result, modify(result, path, after, editOptions));
+    }
+  };
+
+  visit([], parseJsonc(text, [], { allowTrailingComma: true }), value);
+  return result;
+}
+
+const editOptions = { formattingOptions: { insertSpaces: true, tabSize: 2 } };
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isStrictJson(text: string) {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

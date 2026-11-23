@@ -16,3 +16,9 @@ export const template = createTemplate({
   prepare: prepareRoot,
   produce: (context) => produceMonorepo(context as Parameters<typeof produceMonorepo>[0]),
 });
+
+/**
+ * Creates a config file for the template, such as a \`create-typescript-monorepo-bingo.config.ts\`
+ * whose \`options\` override what's inferred, for example a package's \`kind\`.
+ */
+export const createConfig: typeof template.createConfig = template.createConfig;

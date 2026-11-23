@@ -7,4 +7,7 @@ permissions:
   simple-git-hooks:
     build: false
 
+publicHoistPattern:
+  - '@typescript/old'
+
 trustPolicy: no-downgrade

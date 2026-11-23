@@ -90,3 +90,23 @@ export function sortByDependencies(packages: PackageSpec[]): PackageSpec[] {
 export function usesTaskRunner(options: RootOptions): boolean {
   return !!options.taskRunner && options.taskRunner !== 'none';
 }
+
+/**
+ * Gets the directories that hold workspace packages, such as \`packages\` and \`apps\`.
+ */
+export function getPackageParents(options: RootOptions): string[] {
+  const parents = new Set(
+    (options.packages ?? [])
+      .filter((pkg) => pkg.kind !== 'build')
+      .map((pkg) => pkg.directory.split('/').slice(0, -1).join('/'))
+      .filter(Boolean),
+  );
+  return parents.size ? [...parents].sort() : ['packages'];
+}
+
+/**
+ * Gets glob patterns for an output directory, like \`dist\`, in every package.
+ */
+export function getPackageGlobs(options: RootOptions, suffix: string): string[] {
+  return getPackageParents(options).map((parent) => `${parent}/*/${suffix}`);
+}

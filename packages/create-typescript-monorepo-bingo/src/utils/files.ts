@@ -1,4 +1,5 @@
 import type { IntakeDirectory, IntakeEntry } from 'bingo-fs';
+import { type ParseError, parse as parseJsonc } from 'jsonc-parser';
 
 /**
  * Finds an entry by slash-separated path in an intake directory.
@@ -40,36 +41,35 @@ export function readText(files: IntakeDirectory | undefined, filePath: string): 
 }
 
 /**
- * Reads and parses a JSON file by slash-separated path in an intake directory.
- * Returns undefined for missing or unparseable files.
+ * Reads and parses a JSON (or JSONC, with comments and trailing commas) file by
+ * slash-separated path in an intake directory. Returns undefined for missing files.
+ * @throws If the file exists but can't be parsed, so it's never mistaken for empty.
  */
 export function readJson(
   files: IntakeDirectory | undefined,
   filePath: string,
 ): Record<string, unknown> | undefined {
   const text = readText(files, filePath);
-  if (text === undefined) {
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
+  return text === undefined ? undefined : parseJsonText(text, filePath);
 }
 
 /**
- * Parses JSON text from an intake prop, or returns an empty object.
+ * Parses JSON or JSONC text from an intake prop, or returns an empty object for none.
+ * @throws If the text can't be parsed, so a file is never mistaken for empty and wiped.
  */
-export function parseJsonText(text: string | undefined): Record<string, unknown> {
+export function parseJsonText(
+  text: string | undefined,
+  filePath = 'a JSON file',
+): Record<string, unknown> {
   if (text === undefined) {
     return {};
   }
 
-  try {
-    return JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    return {};
+  const errors: ParseError[] = [];
+  const value = parseJsonc(text, errors, { allowTrailingComma: true }) as unknown;
+  if (errors.length || !value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Could not parse ${filePath} as a JSON object. Fix or remove it, then re-run.`);
   }
+
+  return value as Record<string, unknown>;
 }

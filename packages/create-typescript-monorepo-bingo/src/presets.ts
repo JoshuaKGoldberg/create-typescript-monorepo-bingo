@@ -24,6 +24,7 @@ import { blockRootPackageJson } from './blocks/root/blockRootPackageJson.ts';
 import { blockRootTSConfig } from './blocks/root/blockRootTSConfig.ts';
 import { blockSite } from './blocks/root/blockSite.ts';
 import { blockNx, blockPnpmTasks, blockTurborepo } from './blocks/root/blockTaskRunners.ts';
+import { blockTransitions } from './blocks/root/blockTransitions.ts';
 import { blockVitest } from './blocks/root/blockVitest.ts';
 import { blockVSCode } from './blocks/root/blockVSCode.ts';
 
@@ -52,6 +53,7 @@ const rootBlocks = [
   blockRootPackageJson,
   blockRootTSConfig,
   blockSite,
+  blockTransitions,
   blockTurborepo,
   blockVitest,
   blockVSCode,

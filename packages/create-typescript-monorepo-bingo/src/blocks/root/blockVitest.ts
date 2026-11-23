@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
 import { action } from '../../utils/actions.ts';
-import { usesTaskRunner } from '../../utils/options.ts';
+import { getPackageParents, usesTaskRunner } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import { blockGitHubActionsCI, getNodeVersionsMatrix } from './blockGitHubActionsCI.ts';
 import { blockGitignore } from './blockGitignore.ts';
@@ -100,7 +100,37 @@ export const blockVitest = rootBase.createBlock({
         }),
       ],
       files: {
-        'vitest.config.ts': `import { readdirSync } from 'node:fs';
+        'vitest.config.ts': createVitestConfig(getPackageParents(options), coverageExclude),
+      },
+    };
+  },
+});
+
+function createVitestConfig(parents: string[], coverageExclude: string) {
+  const include = parents.map((parent) => `'${parent}/*/src/**/*.ts'`).join(', ');
+  const project = (
+    parentExpression: string,
+    indent: string,
+  ) => `readdirSync(path.join(import.meta.dirname, ${parentExpression}), { withFileTypes: true })
+${indent}.filter((entry) => entry.isDirectory())
+${indent}.map(({ name }) => ({
+${indent}  test: {
+${indent}    clearMocks: true,
+${indent}    include: ['**/src/**/*.test.ts'],
+${indent}    name,
+${indent}    root: path.join(import.meta.dirname, ${parentExpression}, name),
+${indent}    setupFiles: ['console-fail-test/setup'],
+${indent}  },
+${indent}}))`;
+
+  const projects =
+    parents.length === 1
+      ? project(`'${parents[0] ?? 'packages'}'`, '      ')
+      : `[${parents.map((parent) => `'${parent}'`).join(', ')}].flatMap((parent) =>
+      ${project('parent', '        ')},
+    )`;
+
+  return `import { readdirSync } from 'node:fs';
 import path from 'node:path';
 
 import { defaultExclude, defineConfig, type ViteUserConfigExport } from 'vitest/config';
@@ -109,27 +139,14 @@ const config: ViteUserConfigExport = defineConfig({
   test: {
     coverage: {
       exclude: [...defaultExclude, ${coverageExclude}],
-      include: ['packages/*/src/**/*.ts'],
+      include: [${include}],
       reporter: ['html', 'lcov', 'text'],
     },
 
-    projects: readdirSync(path.join(import.meta.dirname, 'packages'), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map(({ name }) => ({
-      test: {
-        clearMocks: true,
-        include: ['**/src/**/*.test.ts'],
-        name,
-        root: path.join(import.meta.dirname, 'packages', name),
-        setupFiles: ['console-fail-test/setup'],
-      },
-    })),
+    projects: ${projects},
   },
 });
 
 export default config;
-`,
-      },
-    };
-  },
-});
+`;
+}

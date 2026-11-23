@@ -11,6 +11,7 @@ const actionVersions: Partial<Record<string, string>> = {
   'JoshuaKGoldberg/all-contributors-auto-action': 'v0.7.0', // renovate: datasource=github-tags depName=JoshuaKGoldberg/all-contributors-auto-action
   'marcalexiei/changesets-release-commenter': 'v0.3.1', // renovate: datasource=github-tags depName=marcalexiei/changesets-release-commenter
   'octoguide/bot': '0.33.1', // renovate: datasource=github-tags depName=octoguide/bot
+  'peter-evans/create-pull-request': 'v8.1.3', // renovate: datasource=github-tags depName=peter-evans/create-pull-request
   'pnpm/setup': 'v3.2.0', // renovate: datasource=github-tags depName=pnpm/setup
 };
 

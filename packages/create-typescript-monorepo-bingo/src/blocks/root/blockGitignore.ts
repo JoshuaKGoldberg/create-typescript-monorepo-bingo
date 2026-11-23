@@ -23,8 +23,9 @@ export const blockGitignore = rootBase.createBlock({
   },
   produce({ props }) {
     const lines = (props.existing ?? '')
+      .replace(/\n+$/, '')
       .split('\n')
-      .filter(Boolean)
+      .filter((line, index, all) => line || all.length > 1)
       .map((line) => (anchoredNodeModules.has(line.trim()) ? 'node_modules/' : line));
     const present = new Set(lines.map((line) => line.trim()));
 

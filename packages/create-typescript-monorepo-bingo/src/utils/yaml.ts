@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+
 import {
   type Document,
   isMap,
@@ -93,8 +95,8 @@ function mergeNode(document: Document, node: unknown, value: unknown): unknown {
     const sorted = isSortedMap(node);
     const spaced = node.items.slice(1).some((pair) => isNode(pair.key) && pair.key.spaceBefore);
 
-    const keys = new Set(Object.keys(value));
-    node.items = node.items.filter((pair) => keys.has(keyText(pair.key)));
+    // Keys CTM doesn't produce are the repository's own, such as a hand-added
+    // concurrency group or trigger: they're kept, never removed.
 
     for (const [key, child] of Object.entries(value)) {
       const pair = node.items.find((item) => keyText(item.key) === key);
@@ -133,11 +135,7 @@ function mergeNode(document: Document, node: unknown, value: unknown): unknown {
       return document.createNode(value);
     }
 
-    node.items = value.map((item, index) =>
-      index < node.items.length
-        ? mergeNode(document, node.items[index], item)
-        : document.createNode(item),
-    );
+    node.items = mergeSequence(document, node.items, value);
 
     return node;
   }
@@ -151,6 +149,59 @@ function mergeNode(document: Document, node: unknown, value: unknown): unknown {
   }
 
   return document.createNode(value);
+}
+
+/**
+ * Merges a sequence. Items that are maps, like workflow steps, are matched to existing
+ * items by their id, name, action or command, so hand-added items stay where they are.
+ * Scalar items are combined: existing ones are kept, and new ones appended.
+ */
+function mergeSequence(document: Document, existing: unknown[], value: unknown[]): unknown[] {
+  if (value.every((item) => !isPlainObject(item) && !Array.isArray(item))) {
+    const existingScalars = existing.filter((node) => isScalar(node));
+    const known = new Set(existingScalars.map((node) => node.value));
+    return [
+      ...existing,
+      ...value.filter((item) => !known.has(item)).map((item) => document.createNode(item)),
+    ];
+  }
+
+  const unmatched = [...existing];
+  const merged: unknown[] = [];
+
+  for (const item of value) {
+    const index = unmatched.findIndex((node) => isSameItem(node, item));
+    if (index === -1) {
+      merged.push(document.createNode(item));
+      continue;
+    }
+
+    // Hand-added items before the match stay where they are.
+    merged.push(...unmatched.splice(0, index), mergeNode(document, unmatched.shift(), item));
+  }
+
+  return [...merged, ...unmatched];
+}
+
+function isSameItem(node: unknown, item: unknown) {
+  if (!isMap(node) || !isPlainObject(item)) {
+    return false;
+  }
+
+  for (const key of ['id', 'name', 'uses', 'run']) {
+    const ours = item[key];
+    const theirs = node.get(key);
+    if (typeof ours === 'string' && typeof theirs === 'string') {
+      return key === 'uses' ? withoutVersion(ours) === withoutVersion(theirs) : ours === theirs;
+    }
+  }
+
+  // Other maps, like schedule entries, match when they're equal.
+  return isDeepStrictEqual(node.toJSON(), item);
+}
+
+function withoutVersion(uses: string) {
+  return uses.replace(/@[^@/]*$/, '');
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

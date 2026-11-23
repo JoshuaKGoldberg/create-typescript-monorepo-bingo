@@ -38,6 +38,13 @@ export function readConfigObject(sourceText: string | undefined): StaticObject |
 }
 
 /**
+ * Whether a source file has any comments.
+ */
+export function hasComments(sourceText: string): boolean {
+  return parseSync('config.ts', sourceText).comments.length > 0;
+}
+
+/**
  * Reads the layout of the object a config file exports by default.
  * @see readConfigObject
  */
@@ -282,4 +289,107 @@ function visit(node: unknown, callback: (node: AstNode) => void) {
       visit(child, callback);
     }
   }
+}
+
+export interface ESLintExtras {
+  /**
+   * Config array entries CTM doesn't produce, as source text.
+   */
+  configs: string[];
+
+  /**
+   * Import declarations from modules CTM doesn't import, as source text.
+   */
+  imports: string[];
+}
+
+/**
+ * Finds what a repository added to a flat ESLint config made by CTM: entries of
+ * `defineConfig(...)` whose `files` (or shape) don't match one of CTM's, and imports
+ * of other modules. Comments directly before an entry are kept with it.
+ */
+export function readESLintExtras(
+  sourceText: string | undefined,
+  ownSignatures: ReadonlySet<string>,
+  ownModules: ReadonlySet<string>,
+): ESLintExtras | undefined {
+  if (sourceText === undefined) {
+    return undefined;
+  }
+
+  const { errors, program } = parseSync('eslint.config.ts', sourceText);
+  if (errors.length) {
+    return undefined;
+  }
+
+  const body = program.body as unknown as (AstNode & { end: number; start: number })[];
+  const imports = body
+    .filter(
+      (node) =>
+        node.type === 'ImportDeclaration' &&
+        !ownModules.has((node.source as { value: string }).value),
+    )
+    .map((node) => sourceText.slice(node.start, node.end));
+
+  const exported = body.find((node) => node.type === 'ExportDefaultDeclaration')?.declaration as
+    | AstNode
+    | undefined;
+  const args =
+    exported?.type === 'CallExpression'
+      ? (exported.arguments as (AstNode & { end: number; start: number })[])
+      : exported?.type === 'ArrayExpression'
+        ? (exported.elements as (AstNode & { end: number; start: number })[])
+        : [];
+
+  const configs: string[] = [];
+  let previousEnd = args[0]?.start ?? 0;
+
+  for (const arg of args) {
+    const leading = sourceText.slice(previousEnd, arg.start).replace(/^\s*,/, '');
+    const comments = leading
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('//') || line.startsWith('/*') || line.startsWith('*'));
+    previousEnd = arg.end;
+
+    if (!ownSignatures.has(getESLintConfigSignature(arg))) {
+      configs.push([...comments, sourceText.slice(arg.start, arg.end)].join('\n  '));
+    }
+  }
+
+  return { configs, imports };
+}
+
+/**
+ * Identifies a flat config entry by its `files`, or by its only key.
+ */
+function getESLintConfigSignature(node: AstNode): string {
+  if (node.type !== 'ObjectExpression') {
+    return `other:${node.type}`;
+  }
+
+  const properties = node.properties as AstNode[];
+  const files = properties.find(
+    (property) => property.type === 'Property' && getKeyName(property.key as AstNode) === 'files',
+  );
+  if (files) {
+    return `files:${JSON.stringify(evaluate(files.value as AstNode) ?? null)}`;
+  }
+
+  const keys = properties.map((property) =>
+    property.type === 'Property' ? getKeyName(property.key as AstNode) : property.type,
+  );
+  return `keys:${keys.join(',')}`;
+}
+
+/**
+ * Gets the signatures of every entry in a flat ESLint config's source.
+ */
+export function readESLintSignatures(sourceText: string): Set<string> {
+  const { program } = parseSync('eslint.config.ts', sourceText);
+  const exported = (program.body as unknown as AstNode[]).find(
+    (node) => node.type === 'ExportDefaultDeclaration',
+  )?.declaration as AstNode | undefined;
+  const args = exported?.type === 'CallExpression' ? (exported.arguments as AstNode[]) : [];
+  return new Set(args.map(getESLintConfigSignature));
 }

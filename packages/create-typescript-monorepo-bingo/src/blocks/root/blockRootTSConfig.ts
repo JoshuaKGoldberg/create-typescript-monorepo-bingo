@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { rootBase } from '../../bases/rootBase.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatJson } from '../../utils/json.ts';
-import { getBuildPackageName } from '../../utils/options.ts';
+import { getBuildPackageName, getPackageGlobs } from '../../utils/options.ts';
 
 interface TSConfigReference {
   path: string;
@@ -43,7 +43,7 @@ export const blockRootTSConfig = rootBase.createBlock({
     const include = new Set([
       ...((existing.include as string[] | undefined) ?? [
         './*.config.ts',
-        './packages/*/tsdown.config.ts',
+        ...getPackageGlobs(options, 'tsdown.config.ts').map((glob) => `./${glob}`),
       ]),
       ...(props.include ?? []),
     ]);

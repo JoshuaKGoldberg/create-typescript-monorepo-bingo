@@ -4,20 +4,18 @@ import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
 import { readText } from '../../utils/files.ts';
 import { mergeList } from '../../utils/lists.ts';
+import { getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
-import { readESLintIgnoresWithSource } from '../../utils/staticConfig.ts';
+import {
+  readESLintExtras,
+  readESLintIgnoresWithSource,
+  readESLintSignatures,
+} from '../../utils/staticConfig.ts';
 import { blockGitHubActionsCI, type WorkflowStep } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 import { blockVSCode } from './blockVSCode.ts';
 
-const baseIgnores = [
-  '**/*.snap',
-  '**/node_modules',
-  'coverage',
-  'packages/*/dist',
-  'packages/*/lib',
-  'pnpm-lock.yaml',
-];
+const baseIgnores = ['**/*.snap', '**/node_modules', 'coverage', 'pnpm-lock.yaml'];
 
 /**
  * Owns the root flat `eslint.config.ts`: typescript-eslint with `projectService`,
@@ -29,11 +27,21 @@ export const blockESLint = rootBase.createBlock({
   about: {
     name: 'ESLint',
   },
-  intake({ files }) {
-    const existingIgnores = readESLintIgnoresWithSource(readText(files, 'eslint.config.ts'));
-    return existingIgnores && { existingIgnores };
+  intake({ files, options }) {
+    const existing = readText(files, 'eslint.config.ts');
+    const existingIgnores = readESLintIgnoresWithSource(existing);
+    const extras = readESLintExtras(
+      existing,
+      readESLintSignatures(createESLintConfig([], options.workflowExtension ?? 'yaml')),
+      ownModules,
+    );
+    return {
+      ...(existingIgnores && { existingIgnores }),
+      ...(extras && { extras }),
+    };
   },
   props: {
+    extras: z.object({ configs: z.array(z.string()), imports: z.array(z.string()) }).optional(),
     existingIgnores: z
       .object({ lines: z.array(z.string()), values: z.array(z.string()) })
       .optional(),
@@ -43,16 +51,19 @@ export const blockESLint = rootBase.createBlock({
   produce({ options, props }) {
     const ignores = mergeList(props.existingIgnores?.values, [
       ...baseIgnores,
+      ...getPackageGlobs(options, 'dist'),
+      ...getPackageGlobs(options, 'lib'),
       ...(props.ignores ?? []),
     ]);
 
     // Existing entries keep their source lines, comments included; new ones are appended.
     const existingValues = new Set(props.existingIgnores?.values);
     const ignoreLines = [
-      ...(props.existingIgnores?.lines.map((line) => `      ${line.trim()}`) ?? []),
+      ...(props.existingIgnores?.lines.map((line) => `      ${withTrailingComma(line.trim())}`) ??
+        []),
       ...ignores
         .filter((ignore) => !existingValues.has(ignore))
-        .map((ignore) => `      '${ignore}',`),
+        .map((ignore) => `      '${ignore.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}',`),
     ];
     const workflowExtension = options.workflowExtension ?? defaults.workflowExtension;
     const prebuildSteps: WorkflowStep[] = (props.lintPrebuildSteps ?? []).map((run) => ({ run }));
@@ -103,13 +114,40 @@ export const blockESLint = rootBase.createBlock({
         }),
       ],
       files: {
-        'eslint.config.ts': createESLintConfig(ignoreLines, workflowExtension),
+        'eslint.config.ts': createESLintConfig(ignoreLines, workflowExtension, props.extras),
       },
     };
   },
 });
 
-function createESLintConfig(ignoreLines: string[], workflowExtension: string) {
+const ownModules = new Set([
+  '@eslint-community/eslint-plugin-eslint-comments/configs',
+  '@eslint/js',
+  '@eslint/markdown',
+  '@vitest/eslint-plugin',
+  'eslint-plugin-jsdoc',
+  'eslint-plugin-jsonc',
+  'eslint-plugin-package-json',
+  'eslint-plugin-perfectionist',
+  'eslint-plugin-regexp',
+  'eslint-plugin-yml',
+  'eslint/config',
+  'typescript-eslint',
+]);
+
+function withTrailingComma(line: string) {
+  return line.startsWith('//') || line.startsWith('/*') || line.endsWith(',') ? line : `${line},`;
+}
+
+/**
+ * Creates CTM's flat ESLint config. Config entries and imports a repository added are
+ * kept after CTM's own; edits inside CTM's own entries are replaced on transition.
+ */
+function createESLintConfig(
+  ignoreLines: string[],
+  workflowExtension: string,
+  extras?: { configs: string[]; imports: string[] },
+) {
   return `import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 import js from '@eslint/js';
 import markdown from '@eslint/markdown';
@@ -122,7 +160,7 @@ import * as regexp from 'eslint-plugin-regexp';
 import yml from 'eslint-plugin-yml';
 import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
-
+${extras?.imports.length ? `${extras.imports.join('\n')}\n` : ''}
 export default defineConfig(
   {
     ignores: [
@@ -224,7 +262,7 @@ ${ignoreLines.join('\n')}
       'yml/file-extension': 'off',
       'yml/sort-keys': ['error', { order: { type: 'asc' }, pathPattern: '^.*$' }],
     },
-  },
+  },${extras?.configs.length ? `\n${extras.configs.map((config) => `  ${config},`).join('\n')}` : ''}
 );
 `;
 }

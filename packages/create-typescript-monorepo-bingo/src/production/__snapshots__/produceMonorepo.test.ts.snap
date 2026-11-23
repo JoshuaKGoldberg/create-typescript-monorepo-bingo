@@ -20,6 +20,7 @@ exports[`produceMonorepo > creates every file of a new repository 1`] = `
   ".github/workflows/contributors.yaml",
   ".github/workflows/octoguide.yaml",
   ".github/workflows/release.yaml",
+  ".github/workflows/transitions.yaml",
   ".gitignore",
   ".nvmrc",
   ".vscode/extensions.json",

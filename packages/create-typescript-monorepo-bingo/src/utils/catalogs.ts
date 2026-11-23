@@ -103,7 +103,7 @@ export function resolveDependencies(
       continue;
     }
 
-    dependencies[dependency] = resolveSpecifier(existingSpecifier, specifier);
+    dependencies[dependency] = resolveSpecifier(existingSpecifier, specifier, dependency);
   }
 
   for (const [dependency, specifier] of Object.entries(dependencies)) {

@@ -5,6 +5,7 @@ import { readText } from '../../utils/files.ts';
 import { mergeList } from '../../utils/lists.ts';
 import { pinned } from '../../utils/pins.ts';
 import {
+  hasComments,
   printStatic,
   readConfigLayout,
   readConfigObject,
@@ -32,6 +33,11 @@ export const blockKnip = rootBase.createBlock({
   },
   produce({ props }) {
     const existing = readConfigObject(props.existing) ?? {};
+    // A config CTM can't read back statically, or with comments, is the repository's own:
+    // CTM leaves it as it is rather than lose what it can't represent.
+    const keepExisting =
+      props.existing !== undefined &&
+      (!readConfigObject(props.existing) || hasComments(props.existing));
     const existingWorkspaces = (existing.workspaces ?? {}) as Record<string, StaticObject>;
     const root = existingWorkspaces['.'] ?? {};
     const rootIgnores = Array.isArray(root.ignoreDependencies)
@@ -70,7 +76,10 @@ export const blockKnip = rootBase.createBlock({
         }),
       ],
       files: {
-        'knip.config.ts': `import type { KnipConfig } from 'knip';
+        'knip.config.ts':
+          keepExisting && props.existing !== undefined
+            ? props.existing
+            : `import type { KnipConfig } from 'knip';
 
 const config: KnipConfig = ${printStatic(config, readConfigLayout(props.existing))};
 

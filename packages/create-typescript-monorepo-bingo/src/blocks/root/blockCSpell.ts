@@ -4,6 +4,7 @@ import { rootBase } from '../../bases/rootBase.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatJson } from '../../utils/json.ts';
 import { compareCaseInsensitive, mergeList } from '../../utils/lists.ts';
+import { getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import { blockGitHubActionsCI } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
@@ -15,8 +16,6 @@ const baseIgnorePaths = [
   'CHANGELOG.md',
   'coverage',
   'node_modules',
-  'packages/*/dist',
-  'packages/*/lib',
   'pnpm-lock.yaml',
 ];
 
@@ -36,7 +35,7 @@ export const blockCSpell = rootBase.createBlock({
     ignorePaths: z.array(z.string()).optional(),
     words: z.array(z.string()).optional(),
   },
-  produce({ props }) {
+  produce({ options, props }) {
     const existing = parseJsonText(props.existing);
     const list = (key: string) => existing[key] as string[] | undefined;
 
@@ -60,6 +59,8 @@ export const blockCSpell = rootBase.createBlock({
             dictionaries: mergeList(list('dictionaries'), ['node', 'npm', 'typescript']),
             ignorePaths: mergeList(list('ignorePaths'), [
               ...baseIgnorePaths,
+              ...getPackageGlobs(options, 'dist'),
+              ...getPackageGlobs(options, 'lib'),
               ...(props.ignorePaths ?? []),
             ]),
             words: mergeList(list('words'), props.words ?? [], compareCaseInsensitive),

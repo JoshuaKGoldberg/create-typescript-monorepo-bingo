@@ -8,6 +8,7 @@ const protocolPrefixes = [
   'github:',
   'http:',
   'https:',
+  'jsr:',
   'link:',
   'portal:',
   'workspace:',
@@ -19,11 +20,16 @@ export interface NpmAlias {
 }
 
 /**
- * Whether a specifier uses a protocol that CTM never rewrites,
- * such as `catalog:` or `workspace:`.
+ * Whether a specifier is something CTM never rewrites: a protocol such as `catalog:`
+ * or `workspace:`, a local path or tarball, or a git shorthand like `owner/repo#ref`.
  */
 export function isProtocolSpecifier(specifier: string): boolean {
-  return protocolPrefixes.some((prefix) => specifier.startsWith(prefix));
+  return (
+    protocolPrefixes.some((prefix) => specifier.startsWith(prefix)) ||
+    /^(?:\.{0,2}\/|~\/)/.test(specifier) ||
+    specifier.endsWith('.tgz') ||
+    /^[\w.-]+\/[\w.-]+(?:#.*)?$/.test(specifier)
+  );
 }
 
 /**
@@ -46,12 +52,19 @@ export function parseNpmAlias(specifier: string): NpmAlias | undefined {
 /**
  * Picks the specifier to write for a dependency, given what's on disk and what CTM pins.
  * In order:
- * 1. Protocol specifiers on disk (`catalog:`, `workspace:`, ...) stay as they are.
- * 2. `npm:` aliases: same target name compares ranges; a different target means CTM's wins.
- * 3. Plain ranges: CTM's wins only with a larger minimum version, so Renovate bumps are
- *    never undone, and a different style of the same version (`^1.2.3`) stays.
+ * 1. Protocol specifiers on disk (`catalog:`, `workspace:`, git, paths) stay as they are.
+ * 2. `npm:` aliases: the same target compares ranges; a different target means CTM's wins.
+ *    An alias to the dependency's own name, like `typescript: npm:typescript@^5`, counts
+ *    as a plain range.
+ * 3. Plain ranges: CTM's wins only when the range on disk doesn't already allow CTM's
+ *    version and starts lower, so Renovate bumps are never undone and ranges never narrow.
+ *    A specifier on disk that isn't a range, such as a dist-tag, is kept.
  */
-export function resolveSpecifier(existing: string | undefined, ours: string): string {
+export function resolveSpecifier(
+  existing: string | undefined,
+  ours: string,
+  dependency?: string,
+): string {
   if (existing === undefined || existing === ours) {
     return ours;
   }
@@ -60,19 +73,18 @@ export function resolveSpecifier(existing: string | undefined, ours: string): st
     return existing;
   }
 
-  const existingAlias = parseNpmAlias(existing);
-  const oursAlias = parseNpmAlias(ours);
+  const existingAlias = getAlias(existing, dependency);
+  const oursAlias = getAlias(ours, dependency);
 
   if (existingAlias || oursAlias) {
     if (existingAlias?.name !== oursAlias?.name) {
       return ours;
     }
 
-    // Both are aliases to the same package.
-    return isLargerRange(oursAlias?.range, existingAlias?.range) ? ours : existing;
+    return isUpgrade(existingAlias?.range, oursAlias?.range) ? ours : existing;
   }
 
-  return isLargerRange(ours, existing) ? ours : existing;
+  return isUpgrade(existing, ours) ? ours : existing;
 }
 
 /**
@@ -80,37 +92,58 @@ export function resolveSpecifier(existing: string | undefined, ours: string): st
  * such as two catalog entries for one name. Unlike {@link resolveSpecifier},
  * neither side is privileged; ties keep the first.
  */
-export function largerSpecifier(first: string, second: string): string {
-  const firstAlias = parseNpmAlias(first);
-  const secondAlias = parseNpmAlias(second);
+export function largerSpecifier(first: string, second: string, dependency?: string): string {
+  const firstAlias = getAlias(first, dependency);
+  const secondAlias = getAlias(second, dependency);
 
   if (firstAlias || secondAlias) {
     if (firstAlias?.name !== secondAlias?.name) {
       return second;
     }
 
-    return isLargerRange(secondAlias?.range, firstAlias?.range) ? second : first;
+    return hasLargerMinimum(secondAlias?.range, firstAlias?.range) ? second : first;
   }
 
-  return isLargerRange(second, first) ? second : first;
+  return hasLargerMinimum(second, first) ? second : first;
 }
 
 /**
- * Whether `candidate` has a strictly larger minimum version than `baseline`.
- * Unparseable ranges are never considered larger.
+ * Gets an alias's target, treating an alias to the dependency itself as a plain range.
  */
-function isLargerRange(candidate: string | undefined, baseline: string | undefined): boolean {
+function getAlias(specifier: string, dependency: string | undefined) {
+  const alias = parseNpmAlias(specifier);
+  return alias && alias.name === dependency ? undefined : alias;
+}
+
+/**
+ * Whether moving from `baseline` to `candidate` is an upgrade: `baseline` is a range
+ * that doesn't include `candidate`'s minimum version, and starts lower than it.
+ */
+function isUpgrade(baseline: string | undefined, candidate: string | undefined): boolean {
   const candidateMinimum = minimumVersion(candidate);
   if (!candidateMinimum) {
     return false;
   }
 
-  const baselineMinimum = minimumVersion(baseline);
-  if (!baselineMinimum) {
+  if (!baseline) {
     return true;
   }
 
-  return semver.gt(candidateMinimum, baselineMinimum);
+  const baselineMinimum = minimumVersion(baseline);
+  if (!baselineMinimum) {
+    return false;
+  }
+
+  return (
+    !semver.satisfies(candidateMinimum, baseline, { includePrerelease: true }) &&
+    semver.gt(candidateMinimum, baselineMinimum)
+  );
+}
+
+function hasLargerMinimum(candidate: string | undefined, baseline: string | undefined) {
+  const candidateMinimum = minimumVersion(candidate);
+  const baselineMinimum = minimumVersion(baseline);
+  return !!candidateMinimum && (!baselineMinimum || semver.gt(candidateMinimum, baselineMinimum));
 }
 
 function minimumVersion(range: string | undefined) {
