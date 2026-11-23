@@ -15,10 +15,9 @@
   "type": "module",
   "scripts": {
     "build": "tsdown",
+    "e2e": "node packages/create-typescript-monorepo-bingo/src/e2e/runE2E.ts",
     "format": "oxfmt",
     "lint": "eslint . --max-warnings 0",
-    "lint:knip": "knip",
-    "lint:packages": "pnpm dedupe --check",
     "lint:spelling": "cspell \"**\" \".github/**/*\"",
     "prepare": "simple-git-hooks",
     "test": "vitest",

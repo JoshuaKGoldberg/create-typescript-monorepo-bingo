@@ -1,0 +1,23 @@
+{
+  "dictionaries": ["node", "npm", "typescript"],
+  "ignorePaths": [
+    "*.tsbuildinfo",
+    ".github",
+    "CHANGELOG.md",
+    "coverage",
+    "node_modules",
+    "packages/*/dist",
+    "packages/*/lib",
+    "pnpm-lock.yaml"
+  ],
+  "words": [
+    "autorelease",
+    "dbaeumer",
+    "marcalexiei",
+    "Octo",
+    "octoguide",
+    "quasis",
+    "RELEASEBOT",
+    "unparseable"
+  ]
+}

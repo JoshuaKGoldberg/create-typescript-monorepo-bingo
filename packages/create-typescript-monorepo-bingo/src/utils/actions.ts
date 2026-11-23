@@ -3,7 +3,7 @@
  * CTM's own `.github/renovate.json` has a custom regex manager for this file,
  * so Renovate keeps these current the same way it does for workflow files.
  */
-const actionVersions: Record<string, string> = {
+const actionVersions: Partial<Record<string, string>> = {
   'actions/checkout': 'v7.0.1', // renovate: datasource=github-tags depName=actions/checkout
   'actions/create-github-app-token': 'v3.3.0', // renovate: datasource=github-tags depName=actions/create-github-app-token
   'changesets/action': 'v2.1.2', // renovate: datasource=github-tags depName=changesets/action

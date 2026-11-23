@@ -35,7 +35,7 @@ const namedCatalogsByField: Partial<Record<DependencyField, string>> = {
 /**
  * Gets which catalog a dependency in a field should be written to, if any.
  */
-export function getCatalogFor(
+function getCatalogFor(
   options: RootOptions,
   field: DependencyField,
   dependency: string,
@@ -61,14 +61,14 @@ export function getCatalogFor(
 /**
  * Gets the `catalog:` specifier for a catalog name.
  */
-export function getCatalogSpecifier(catalog: string): string {
+function getCatalogSpecifier(catalog: string): string {
   return catalog === 'default' ? 'catalog:' : `catalog:${catalog}`;
 }
 
 /**
  * Gets the catalog name a `catalog:` specifier refers to.
  */
-export function getCatalogName(specifier: string): string {
+function getCatalogName(specifier: string): string {
   return specifier.slice('catalog:'.length) || 'default';
 }
 

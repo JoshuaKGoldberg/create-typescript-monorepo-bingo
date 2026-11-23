@@ -20,7 +20,7 @@ export function formatYaml(value: unknown): string {
  * Stringifies a GitHub Actions workflow, with blank lines between top-level keys
  * and between jobs, as hand-written workflows usually have.
  */
-export function formatWorkflow(value: unknown): string {
+function formatWorkflow(value: unknown): string {
   const lines = formatYaml(value).trimEnd().split('\n');
   const output: string[] = [];
   let inJobs = false;
@@ -58,9 +58,30 @@ export function formatYamlFile(
   }
 
   const document = parseDocument(existingText);
-  document.contents = mergeNode(document, document.contents, value) as typeof document.contents;
+  const merged = workflow ? withExistingJobs(value, document.toJS()) : value;
+  document.contents = mergeNode(document, document.contents, merged) as typeof document.contents;
 
-  return document.toString({ lineWidth: 0, singleQuote: true });
+  return document.toString({ lineWidth: 0, singleQuote: true }).replaceAll(/[ \t]+$/gm, '');
+}
+
+/**
+ * Keeps jobs in an existing workflow that CTM doesn't produce, such as hand-written ones.
+ */
+function withExistingJobs(value: unknown, existing: unknown): unknown {
+  if (!isPlainObject(value) || !isPlainObject(existing) || !isPlainObject(existing.jobs)) {
+    return value;
+  }
+
+  const jobs = isPlainObject(value.jobs) ? value.jobs : {};
+  return {
+    ...value,
+    jobs: { ...jobs, ...omitKeys(existing.jobs, Object.keys(jobs)) },
+  };
+}
+
+function omitKeys(value: Record<string, unknown>, keys: string[]) {
+  const omitted = new Set(keys);
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !omitted.has(key)));
 }
 
 function mergeNode(document: Document, node: unknown, value: unknown): unknown {
@@ -69,11 +90,11 @@ function mergeNode(document: Document, node: unknown, value: unknown): unknown {
       return document.createNode(value);
     }
 
-    const keys = new Set(Object.keys(value));
-    node.items = node.items.filter((pair) => keys.has(keyText(pair.key)));
-
     const sorted = isSortedMap(node);
     const spaced = node.items.slice(1).some((pair) => isNode(pair.key) && pair.key.spaceBefore);
+
+    const keys = new Set(Object.keys(value));
+    node.items = node.items.filter((pair) => keys.has(keyText(pair.key)));
 
     for (const [key, child] of Object.entries(value)) {
       const pair = node.items.find((item) => keyText(item.key) === key);
@@ -83,18 +104,25 @@ function mergeNode(document: Document, node: unknown, value: unknown): unknown {
       }
 
       const created = document.createPair(key, child);
+      const index = sorted
+        ? node.items.findIndex((item) => keyText(item.key).localeCompare(key) > 0)
+        : -1;
+
       if (spaced && isNode(created.key)) {
         created.key.spaceBefore = true;
       }
 
-      const index = sorted
-        ? node.items.findIndex((item) => keyText(item.key).localeCompare(key) > 0)
-        : -1;
       if (index === -1) {
         node.items.push(created);
       } else {
         node.items.splice(index, 0, created);
       }
+    }
+
+    // Blank lines separate siblings, so whichever entry ends up first doesn't get one.
+    const first = node.items[0]?.key;
+    if (spaced && isNode(first)) {
+      first.spaceBefore = false;
     }
 
     return node;

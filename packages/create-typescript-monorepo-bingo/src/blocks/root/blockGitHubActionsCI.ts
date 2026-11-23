@@ -35,7 +35,7 @@ export type CIJob = z.infer<typeof ciJobSchema>;
  * The shared setup step: bingo's `$/.github/actions/setup`, which checks out,
  * installs pnpm and Node.js, and installs dependencies.
  */
-export function createSetupStep(inputs?: Record<string, unknown>): WorkflowStep {
+function createSetupStep(inputs?: Record<string, unknown>): WorkflowStep {
   return {
     uses: '$/.github/actions/setup',
     ...(inputs && Object.keys(inputs).length && { with: inputs }),
@@ -50,7 +50,7 @@ export function getNodeVersionsMatrix(nodeEngines: string): (number | string)[] 
   const versions: (number | string)[] = [];
 
   for (const part of nodeEngines.split('||')) {
-    const match = /(\d+)\.(\d+)\.(\d+)/.exec(part);
+    const match = /(\d+)\.\d+\.\d+/.exec(part);
     if (!match) {
       continue;
     }

@@ -3,7 +3,7 @@ import { defaults, type PackageSpec, type RootOptions } from '../options.ts';
 /**
  * Resolves the npm scope for the private build package, such as `@bingo`.
  */
-export function getScope(options: RootOptions): string {
+function getScope(options: RootOptions): string {
   return options.scope ?? `@${options.repository}`;
 }
 

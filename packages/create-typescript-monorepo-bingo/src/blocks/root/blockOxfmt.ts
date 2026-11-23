@@ -9,6 +9,7 @@ import {
   readConfigLayout,
   readConfigObject,
   type StaticObject,
+  type StaticValue,
 } from '../../utils/staticConfig.ts';
 import { blockGitHubActionsCI } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
@@ -57,9 +58,9 @@ export const blockOxfmt = rootBase.createBlock({
       ]),
     };
 
-    const sorted = Object.fromEntries(
+    const sorted = Object.fromEntries<StaticValue>(
       Object.entries(config).sort(([a], [b]) => a.localeCompare(b)),
-    ) as StaticObject;
+    );
 
     return {
       extensions: [

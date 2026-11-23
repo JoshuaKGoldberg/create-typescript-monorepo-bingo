@@ -30,7 +30,7 @@ import { blockVSCode } from './blocks/root/blockVSCode.ts';
 /**
  * Every repository-level Block, in the order they're produced.
  */
-export const rootBlocks = [
+const rootBlocks = [
   blockAllContributors,
   blockBuildPackage,
   blockChangesets,

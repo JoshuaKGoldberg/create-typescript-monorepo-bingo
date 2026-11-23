@@ -39,7 +39,7 @@ export const blockOctoGuide = rootBase.createBlock({
                         uses: action('octoguide/bot'),
                         with: {
                           'github-token': '${{ secrets.GITHUB_TOKEN }}',
-                          rules: `${JSON.stringify({ 'pr-title-conventional': true }, null, 2)}`,
+                          rules: JSON.stringify({ 'pr-title-conventional': true }, null, 2),
                         },
                       },
                     ],

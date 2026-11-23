@@ -3,7 +3,7 @@ import type { CreatedDirectory, IntakeDirectory } from 'bingo-fs';
 import { parse as parseYaml } from 'yaml';
 
 import type { CatalogMode, PackageKind, PackageSpec, RootOptions, TaskRunner } from '../options.ts';
-import { dependencyFields, type DependencyField } from '../utils/catalogs.ts';
+import { type DependencyField, dependencyFields } from '../utils/catalogs.ts';
 import { getDirectory, getEntry, readJson, readText } from '../utils/files.ts';
 import { pin, tryPin } from '../utils/pins.ts';
 import { parseNpmAlias, resolveSpecifier } from '../utils/versions.ts';
@@ -40,7 +40,7 @@ export function prepareRoot(
     return { catalogs: 'default' };
   }
 
-  const rootManifest = readJson<PackageManifest>(files, 'package.json');
+  const rootManifest = readJson(files, 'package.json') as PackageManifest | undefined;
   const workspace = readWorkspaceYaml(files);
   const workspacePackages = findWorkspacePackages(files, workspace?.packages ?? ['packages/*']);
   const repository = parseRepository(rootManifest?.repository);
@@ -105,7 +105,7 @@ function readWorkspaceYaml(files: IntakeDirectory): undefined | WorkspaceYaml {
 
 /**
  * Finds workspace packages by matching `packages/*`-style globs against the in-memory files.
- * Only single-level `<directory>/*` globs and exact directories are supported.
+ * Only single-level `&lt;directory>/*` globs and exact directories are supported.
  */
 export function findWorkspacePackages(
   files: IntakeDirectory | CreatedDirectory,
@@ -127,7 +127,7 @@ export function findWorkspacePackages(
 
     for (const directory of candidates) {
       const packageFiles = getDirectory(files as IntakeDirectory, directory);
-      const manifest = readJson<PackageManifest>(packageFiles, 'package.json');
+      const manifest = readJson(packageFiles, 'package.json') as PackageManifest | undefined;
       if (packageFiles && manifest) {
         found.push({ directory, files: packageFiles, manifest });
       }
@@ -166,10 +166,9 @@ export function inferPackageKind({ directory, files, manifest }: WorkspacePackag
 }
 
 function createPackageSpec(pkg: WorkspacePackage, all: WorkspacePackage[]): PackageSpec {
-  const tsconfig = readJson<{ compilerOptions?: { isolatedDeclarations?: boolean } }>(
-    pkg.files,
-    'tsconfig.json',
-  );
+  const tsconfig = readJson(pkg.files, 'tsconfig.json') as
+    | undefined
+    | { compilerOptions?: { isolatedDeclarations?: boolean } };
   const dependencies = getAllDependencies(pkg.manifest);
   const workspaceNames = new Set(all.map((other) => other.manifest.name));
   const workspaceDependencies = Object.entries(dependencies)
@@ -248,7 +247,7 @@ const namedCatalogs: Partial<Record<DependencyField, string>> = {
 };
 
 /**
- * In named catalog mode, finds `<catalog>:<dependency>` pairs that manifests declare
+ * In named catalog mode, finds `&lt;catalog>:&lt;dependency>` pairs that manifests declare
  * with different specifiers. Those stay uncataloged rather than being forced to one version.
  */
 export function findNamedConflicts(manifests: ManifestWithKind[]): string[] {
@@ -347,7 +346,7 @@ function inferTaskRunner(files: IntakeDirectory, workspace: undefined | Workspac
 
 function inferTitle(files: IntakeDirectory): Partial<RootOptions> {
   const readme = readText(files, 'README.md');
-  const match = readme && (/<h1[^>]*>([^<]+)<\/h1>/.exec(readme) ?? /^#\s+(.+)$/m.exec(readme));
+  const match = readme && (/<h1[^>]*>([^<]+)<\/h1>/.exec(readme) ?? /^# (.+)$/m.exec(readme));
   return match?.[1] ? { title: match[1].trim() } : {};
 }
 

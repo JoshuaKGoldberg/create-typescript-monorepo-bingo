@@ -5,5 +5,8 @@
     "tsBuildInfoFile": "node_modules/.cache/tsbuild/info.json"
   },
   "include": ["./*.config.ts", "./packages/*/tsdown.config.ts"],
-  "references": [{ "path": "./packages/build" }, { "path": "./packages/create-typescript-monorepo-bingo" }]
+  "references": [
+    { "path": "./packages/build" },
+    { "path": "./packages/create-typescript-monorepo-bingo" }
+  ]
 }

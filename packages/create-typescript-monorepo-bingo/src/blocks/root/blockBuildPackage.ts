@@ -21,14 +21,14 @@ import { blockRootTSConfig } from './blockRootTSConfig.ts';
  * TypeScript's API, for typescript-eslint, tsdown's `tsc` declarations and `astro check`.
  * The wrapper only ships a `tsc6` binary, so `tsc` comes from the TypeScript 7 alias.
  */
-export const typescriptSpecifier = (): string => pin('typescript');
+const typescriptSpecifier = (): string => pin('typescript');
 
 /**
  * TypeScript 7, for the `tsc` binary.
  */
-export const typescript7Specifier = (): string => pin('typescript7');
+const typescript7Specifier = (): string => pin('typescript7');
 
-export const tsconfigBase = {
+const tsconfigBase = {
   compilerOptions: {
     allowImportingTsExtensions: true,
     allowUnreachableCode: false,
@@ -77,7 +77,7 @@ export default config;
 `;
 
 /**
- * Owns the private \`@<scope>/build\` package, with the shared tsconfig and tsdown base,
+ * Owns the private \`@&lt;scope>/build\` package, with the shared tsconfig and tsdown base,
  * as well as the root tsdown config and the TypeScript dependencies.
  */
 export const blockBuildPackage = rootBase.createBlock({

@@ -51,7 +51,8 @@ export const blockDocs = rootBase.createBlock({
       }
 
       const segments = docPath.split('/');
-      const fileName = segments.pop() as string;
+      const fileName = segments.at(-1) ?? docPath;
+      segments.pop();
       let directory = files;
       for (const segment of segments) {
         directory = (directory[segment] ??= {}) as Record<string, unknown>;
@@ -127,8 +128,8 @@ There are two steps involved:
 
 ### Finding an Issue
 
-With the exception of very small typos, all changes to this repository generally need to correspond to an [unassigned open issue marked as \`status: accepting prs\` on the issue tracker](${url}/issues?q=is%3Aissue+is%3Aopen+label%3A%22status%3A+accepting+prs%22+no%3Aassignee+).
-If this is your first time contributing, consider searching for [unassigned issues that also have the \`good first issue\` label](${url}/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22+label%3A%22status%3A+accepting+prs%22+no%3Aassignee+).
+With the exception of very small typos, all changes to this repository generally need to correspond to an [unassigned open issue marked as \`status: accepting prs\` on the issue tracker](${url}/issues?q=is:issue+is:open+label:%22status:+accepting+prs%22+no:assignee+).
+If this is your first time contributing, consider searching for [unassigned issues that also have the \`good first issue\` label](${url}/issues?q=is:issue+is:open+label:%22good+first+issue%22+label:%22status:+accepting+prs%22+no:assignee+).
 
 ### Sending a Pull Request
 
@@ -247,7 +248,7 @@ Otherwise we may not be able to review your PR. -->
 ## PR Checklist
 
 - [ ] Addresses an existing open issue: fixes #000
-- [ ] That issue was marked as [\`status: accepting prs\`](${url}/issues?q=is%3Aopen+is%3Aissue+label%3A%22status%3A+accepting+prs%22)
+- [ ] That issue was marked as [\`status: accepting prs\`](${url}/issues?q=is:open+is:issue+label:%22status:+accepting+prs%22)
 - [ ] Steps in [CONTRIBUTING.md](${url}/blob/main/.github/CONTRIBUTING.md) were taken
 
 ## Overview

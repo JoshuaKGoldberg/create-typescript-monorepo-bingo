@@ -4,7 +4,7 @@ import { z } from 'zod';
  * What kind of workspace package a directory holds, which decides what CTM writes for it.
  * - `library`: a tsdown-built TypeScript package, which gets the full package preset.
  * - `bin-js`: a JavaScript-only bin package, which CTM leaves alone apart from listing it.
- * - `build`: the shared `@<scope>/build` package, owned by the root Build block.
+ * - `build`: the shared `@&lt;scope>/build` package, owned by the root Build block.
  * - `site`: a docs site, which is repo-owned.
  * - `repo-owned`: anything else CTM shouldn't touch.
  */
@@ -58,6 +58,10 @@ export const rootOptionsShape = {
     .string()
     .optional()
     .describe('name of a new package to add under packages/, such as "my-lib"'),
+  newPackageDescription: z
+    .string()
+    .optional()
+    .describe('sentence-case description of the --new-package'),
   node: z.string().optional().describe('Node.js version for .nvmrc and CI'),
   nodeEngines: z.string().optional().describe('engines.node range for package.json files'),
   owner: z.string().describe('GitHub organization or user the repository is underneath'),

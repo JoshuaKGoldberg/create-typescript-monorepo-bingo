@@ -87,7 +87,12 @@ export function normalizeOptions(options: RootOptions): RootOptions {
   }
 
   if (options.newPackage && !packages.some((pkg) => pkg.name === options.newPackage)) {
-    packages.push(createNewPackage(options.newPackage, undefined));
+    packages.push(
+      createNewPackage(
+        options.newPackage,
+        options.newPackageDescription ?? `The ${options.newPackage} package in ${options.title}.`,
+      ),
+    );
   }
 
   if (!packages.some((pkg) => pkg.kind === 'build')) {
@@ -124,6 +129,7 @@ function nestFiles(directory: string, files: CreatedDirectory | undefined): Crea
 function withoutExtensions<Options extends object>(
   creation: Partial<BlockCreation<Options>>,
 ): Partial<Creation> {
-  const { extensions: _, ...rest } = creation;
+  const rest = { ...creation };
+  delete rest.extensions;
   return rest;
 }

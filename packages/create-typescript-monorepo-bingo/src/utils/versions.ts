@@ -27,7 +27,7 @@ export function isProtocolSpecifier(specifier: string): boolean {
 }
 
 /**
- * Parses an `npm:<name>@<range>` alias, splitting at the last `@`.
+ * Parses an `npm:&lt;name>@&lt;range>` alias, splitting at the last `@`.
  * A last `@` at index 0 (as in `npm:@scope/name`) means there's no range.
  */
 export function parseNpmAlias(specifier: string): NpmAlias | undefined {
@@ -48,7 +48,8 @@ export function parseNpmAlias(specifier: string): NpmAlias | undefined {
  * In order:
  * 1. Protocol specifiers on disk (`catalog:`, `workspace:`, ...) stay as they are.
  * 2. `npm:` aliases: same target name compares ranges; a different target means CTM's wins.
- * 3. Plain ranges: the larger minimum version wins, so Renovate bumps are never undone.
+ * 3. Plain ranges: CTM's wins only with a larger minimum version, so Renovate bumps are
+ *    never undone, and a different style of the same version (`^1.2.3`) stays.
  */
 export function resolveSpecifier(existing: string | undefined, ours: string): string {
   if (existing === undefined || existing === ours) {
@@ -68,10 +69,10 @@ export function resolveSpecifier(existing: string | undefined, ours: string): st
     }
 
     // Both are aliases to the same package.
-    return isLargerRange(existingAlias?.range, oursAlias?.range) ? existing : ours;
+    return isLargerRange(oursAlias?.range, existingAlias?.range) ? ours : existing;
   }
 
-  return isLargerRange(existing, ours) ? existing : ours;
+  return isLargerRange(ours, existing) ? ours : existing;
 }
 
 /**

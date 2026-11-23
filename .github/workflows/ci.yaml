@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  pull_request: ~
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/setup
+      - run: pnpm build
+
+  dedupe_check:
+    name: Dedupe Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/setup
+      - run: pnpm dedupe --check
+
+  e2e:
+    name: End-to-End
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/setup
+      - run: pnpm e2e
+
+  engines_check:
+    name: Engines Check (Node.js ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          - 22.22.2
+          - 22
+          - 24.15.0
+          - 24
+          - 26.0.0
+          - 26
+    steps:
+      - uses: $/.github/actions/setup
+        with:
+          cache: false
+          install-flags: --prod --engine-strict --ignore-scripts
+          node-version: ${{ matrix.node-version }}
+
+  format_check:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/setup
+      - run: pnpm format --list-different
+
+  knip:
+    name: Knip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/setup
+      - run: pnpm knip
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/setup
+      - run: pnpm lint
+
+  lint_spelling:
+    name: Lint Spelling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/setup
+      - run: pnpm lint:spelling
+
+  test_node:
+    name: Test (Node.js ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          - 22.22.2
+          - 22
+          - 24.15.0
+          - 24
+          - 26.0.0
+          - 26
+    steps:
+      - uses: $/.github/actions/setup
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: pnpm test
+
+  test_os:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - uses: $/.github/actions/setup
+      - run: pnpm test ${{ matrix.os == 'ubuntu-latest' && '--coverage' || '' }}
+      - if: success() && (matrix.os == 'ubuntu-latest')
+        uses: codecov/codecov-action@v7.1.1
+        with:
+          fail_ci_if_error: true
+          use_oidc: true
+
+  type_check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/setup
+      - run: pnpm typecheck

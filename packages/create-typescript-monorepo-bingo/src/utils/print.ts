@@ -27,7 +27,7 @@ export function readJsonLayout(text: string | undefined): Layout | undefined {
 
   const source = `(${text})`;
   const { errors, program } = parseSync('file.ts', source);
-  const statement = (program.body as unknown as AstNode[])[0];
+  const statement = (program.body as unknown as (AstNode | undefined)[])[0];
   if (errors.length || statement?.type !== 'ExpressionStatement') {
     return undefined;
   }
@@ -164,7 +164,7 @@ function printKey(key: string, settings: PrintSettings) {
     return JSON.stringify(key);
   }
 
-  return /^[A-Za-z_$][\w$]*$/.test(key) ? key : quoteSingle(key);
+  return /^[A-Z_$][\w$]*$/i.test(key) ? key : quoteSingle(key);
 }
 
 function printPrimitive(value: unknown, settings: PrintSettings) {

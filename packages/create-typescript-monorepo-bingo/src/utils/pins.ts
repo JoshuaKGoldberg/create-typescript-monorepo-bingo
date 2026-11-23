@@ -1,6 +1,6 @@
 import pinsPackage from '@ctm/pins/package.json' with { type: 'json' };
 
-const pins: Record<string, string> = pinsPackage.devDependencies;
+const pins: Partial<Record<string, string>> = pinsPackage.devDependencies;
 
 /**
  * Gets the version CTM writes for a dependency.

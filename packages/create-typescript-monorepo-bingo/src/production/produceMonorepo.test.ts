@@ -1,0 +1,185 @@
+import pinsPackage from '@ctm/pins/package.json' with { type: 'json' };
+import type { CreatedDirectory, IntakeDirectory } from 'bingo-fs';
+import { producePreset } from 'bingo-stratum';
+import { describe, expect, it } from 'vitest';
+
+import type { RootOptions } from '../options.ts';
+import { packagePreset, rootPreset } from '../presets.ts';
+import { normalizeOptions, produceMonorepo } from './produceMonorepo.ts';
+
+const options = {
+  author: 'Ex Ample',
+  description: 'An example monorepo.',
+  email: 'ex@example.com',
+  owner: 'example-org',
+  repository: 'example',
+  title: 'Example',
+} satisfies RootOptions;
+
+function toIntake(directory: CreatedDirectory): IntakeDirectory {
+  return Object.fromEntries(
+    Object.entries(directory).flatMap(([name, entry]) => {
+      if (entry === undefined || entry === false) {
+        return [];
+      }
+
+      if (typeof entry === 'string') {
+        return [[name, [entry]]];
+      }
+
+      return [[name, Array.isArray(entry) ? entry : toIntake(entry)]];
+    }),
+  );
+}
+
+function readFile(directory: CreatedDirectory | undefined, filePath: string): string {
+  let current: unknown = directory;
+  for (const segment of filePath.split('/')) {
+    current = (current as Record<string, unknown> | undefined)?.[segment];
+  }
+
+  if (typeof current !== 'string') {
+    throw new Error(`Missing file: ${filePath}`);
+  }
+
+  return current;
+}
+
+function listFiles(directory: CreatedDirectory, prefix = ''): string[] {
+  return Object.entries(directory).flatMap(([name, entry]) =>
+    entry && typeof entry === 'object' && !Array.isArray(entry)
+      ? listFiles(entry, `${prefix}${name}/`)
+      : [`${prefix}${name}`],
+  );
+}
+
+describe(normalizeOptions, () => {
+  it('adds a first package named after the repository, and a build package', () => {
+    expect(normalizeOptions(options).packages).toEqual([
+      {
+        description: 'An example monorepo.',
+        directory: 'packages/example',
+        isolatedDeclarations: true,
+        kind: 'library',
+        name: 'example',
+      },
+      {
+        description: 'Shared build configs for Example',
+        directory: 'packages/build',
+        kind: 'build',
+        name: '@example/build',
+      },
+    ]);
+  });
+
+  it('adds a scoped new package under its unscoped directory', () => {
+    expect(
+      normalizeOptions({ ...options, newPackage: '@example/second' }).packages?.find(
+        (pkg) => pkg.name === '@example/second',
+      ),
+    ).toMatchObject({ directory: 'packages/second', kind: 'library' });
+  });
+});
+
+describe(produceMonorepo, () => {
+  const setup = produceMonorepo({ mode: 'setup', options });
+
+  it('creates every file of a new repository', () => {
+    expect(listFiles(setup.files ?? {}).sort()).toMatchSnapshot();
+  });
+
+  it('produces the same files when transitioning its own output', () => {
+    const transition = produceMonorepo({
+      files: toIntake(setup.files ?? {}),
+      mode: 'transition',
+      options,
+    });
+
+    // Repository-owned files, like docs and starter sources, aren't written again.
+    const transitionFiles = listFiles(transition.files ?? {});
+    expect(transitionFiles.length).toBeGreaterThan(30);
+    for (const file of transitionFiles) {
+      expect(readFile(transition.files, file)).toBe(readFile(setup.files, file));
+    }
+  });
+
+  it('forwards package extensions to root blocks through carriers', () => {
+    const creation = produceMonorepo({
+      mode: 'setup',
+      options: { ...options, catalogs: 'named', newPackage: 'second', packages: [] },
+    });
+
+    const tsconfig = JSON.parse(readFile(creation.files, 'tsconfig.json')) as {
+      references: { path: string }[];
+    };
+    expect(tsconfig.references).toEqual([
+      { path: './packages/build' },
+      { path: './packages/second' },
+    ]);
+
+    // @types/node comes from the package blocks; its catalog entry must reach the root.
+    expect(readFile(creation.files, 'pnpm-workspace.yaml')).toContain("'@types/node':");
+    expect(readFile(creation.files, 'packages/second/package.json')).toContain(
+      '"@types/node": "catalog:dev"',
+    );
+  });
+
+  it('only writes dependency versions that come from the pins package', () => {
+    const pins = new Set<string>(Object.values(pinsPackage.devDependencies));
+    const manifests = listFiles(setup.files ?? {}).filter((file) => file.endsWith('package.json'));
+
+    for (const manifest of manifests) {
+      const contents = JSON.parse(readFile(setup.files, manifest)) as Record<string, unknown>;
+      for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
+        for (const specifier of Object.values(
+          (contents[field] as Record<string, string> | undefined) ?? {},
+        )) {
+          if (!specifier.startsWith('workspace:')) {
+            expect(pins.has(specifier.replace(/^\^/, ''))).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
+  it('only sends extensions to blocks in the production', () => {
+    const normalized = normalizeOptions(options);
+    const rootBlocks = new Set<unknown>(rootPreset.blocks);
+    const packageBlocks = new Set<unknown>(packagePreset.blocks);
+
+    const root = producePreset(rootPreset, {
+      mode: 'setup',
+      options: { ...normalized, preset: 'root' } as RootOptions,
+    });
+    for (const extension of root.extensions) {
+      expect(rootBlocks.has(extension.block)).toBe(true);
+    }
+
+    const pkg = producePreset(packagePreset, {
+      mode: 'setup',
+      options: {
+        ...normalized,
+        package: normalized.packages?.[0],
+        preset: 'package',
+      } as never,
+    });
+    for (const extension of pkg.extensions) {
+      expect(rootBlocks.has(extension.block) || packageBlocks.has(extension.block)).toBe(true);
+    }
+  });
+
+  it('writes per-package scripts and runner config with a task runner', () => {
+    const creation = produceMonorepo({
+      mode: 'setup',
+      options: { ...options, taskRunner: 'turbo' },
+    });
+
+    expect(readFile(creation.files, 'turbo.json')).toContain('"^build"');
+    expect(JSON.parse(readFile(creation.files, 'package.json'))).toMatchObject({
+      scripts: { build: 'turbo run build', test: 'turbo run test', typecheck: 'tsc -b' },
+    });
+    expect(JSON.parse(readFile(creation.files, 'packages/example/package.json'))).toMatchObject({
+      scripts: { build: 'tsdown' },
+    });
+  });
+});

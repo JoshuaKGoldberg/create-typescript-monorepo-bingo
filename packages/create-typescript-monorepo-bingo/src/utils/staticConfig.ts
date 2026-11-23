@@ -72,14 +72,6 @@ function findConfigNode(sourceText: string | undefined): AstNode | undefined {
 
 export type StaticObject = Record<string, StaticValue>;
 
-/**
- * Collects the string literals in a flat ESLint config's global ignores:
- * `ignores: [...]` arrays in config objects that have no other keys.
- */
-export function readESLintIgnores(sourceText: string | undefined): string[] | undefined {
-  return readESLintIgnoresWithSource(sourceText)?.values;
-}
-
 export interface ESLintIgnoresSource {
   /**
    * Source lines of the array's elements, including any comments between them.
@@ -106,12 +98,12 @@ export function readESLintIgnoresWithSource(
 
   let found: ESLintIgnoresSource | undefined;
 
-  visit(program as unknown as AstNode, (node) => {
+  visit(program, (node) => {
     if (found || node.type !== 'ObjectExpression') {
       return;
     }
 
-    const properties = node.properties as AstNode[];
+    const properties = node.properties as (AstNode | undefined)[];
     const [property] = properties;
     if (
       properties.length !== 1 ||

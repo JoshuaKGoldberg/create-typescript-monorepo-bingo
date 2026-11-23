@@ -43,32 +43,20 @@ export function readText(files: IntakeDirectory | undefined, filePath: string): 
  * Reads and parses a JSON file by slash-separated path in an intake directory.
  * Returns undefined for missing or unparseable files.
  */
-export function readJson<T = Record<string, unknown>>(
+export function readJson(
   files: IntakeDirectory | undefined,
   filePath: string,
-): T | undefined {
+): Record<string, unknown> | undefined {
   const text = readText(files, filePath);
   if (text === undefined) {
     return undefined;
   }
 
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text) as Record<string, unknown>;
   } catch {
     return undefined;
   }
-}
-
-/**
- * Reads a JSON file's text and parsed value, for blocks that round-trip its layout.
- */
-export function readJsonFile(
-  files: IntakeDirectory | undefined,
-  filePath: string,
-): undefined | { text: string; value: Record<string, unknown> } {
-  const text = readText(files, filePath);
-  const value = readJson(files, filePath);
-  return text !== undefined && value ? { text, value } : undefined;
 }
 
 /**

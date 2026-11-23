@@ -38,7 +38,7 @@ export function withDefaults<T extends Record<string, unknown>>(
 /**
  * Removes undefined-valued keys from an object, shallowly.
  */
-export function removeUndefined<T extends Record<string, unknown>>(value: T): T {
+function removeUndefined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 }
 

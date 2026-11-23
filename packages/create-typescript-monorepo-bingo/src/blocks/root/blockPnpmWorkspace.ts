@@ -1,4 +1,4 @@
-import { Document, isMap, isScalar, isSeq, parseDocument, type YAMLMap } from 'yaml';
+import { Document, isMap, isNode, isScalar, isSeq, parseDocument } from 'yaml';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
@@ -34,7 +34,7 @@ export const blockPnpmWorkspace = rootBase.createBlock({
   produce({ props }) {
     const document = props.existing ? parseDocument(props.existing) : new Document({});
     if (!isMap(document.contents)) {
-      document.contents = document.createNode({}) as YAMLMap;
+      document.contents = document.createNode({});
     }
 
     // Package globs: keep what's there, adding any new ones.
@@ -62,6 +62,7 @@ export const blockPnpmWorkspace = rootBase.createBlock({
     }
 
     sortMaps(document.contents);
+    spaceTopLevel(document);
 
     return {
       files: {
@@ -167,6 +168,32 @@ function sortMaps(node: unknown) {
     for (const item of node.items) {
       sortMaps(item);
     }
+  }
+}
+
+/**
+ * If top-level keys are separated by blank lines, keeps new ones separated too.
+ */
+function spaceTopLevel(document: Document) {
+  const node = document.contents;
+  if (!isMap(node)) {
+    return;
+  }
+
+  const pairs = node.items.slice(1);
+  if (!pairs.some((pair) => isNode(pair.key) && pair.key.spaceBefore)) {
+    return;
+  }
+
+  for (const pair of pairs) {
+    const key = isNode(pair.key) ? pair.key : document.createNode(pair.key);
+    key.spaceBefore = true;
+    pair.key = key;
+  }
+
+  const first = node.items[0]?.key;
+  if (isNode(first)) {
+    first.spaceBefore = false;
   }
 }
 
