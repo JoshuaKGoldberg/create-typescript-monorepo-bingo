@@ -299,9 +299,9 @@ async function findAnyInDeclarations(directory: string) {
   const leaks: string[] = [];
   const countAny = (text: string) =>
     text
-      .split('\n')
-      .map((line) => line.replace(/\/\/.*$|\/\*.*?\*\//g, ''))
-      .join('\n')
+      .replaceAll(/\/\*[\s\S]*?\*\//g, '')
+      .replaceAll(/\/\/.*$/gm, '')
+      .replaceAll(/(['"`])(?:\\.|(?!\1)[^\\\n])*\1/g, '')
       .match(/\bany\b/g)?.length ?? 0;
 
   for await (const packageJson of fs.glob('*/*/package.json', { cwd: directory })) {
