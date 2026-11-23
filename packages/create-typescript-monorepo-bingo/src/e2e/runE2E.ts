@@ -102,6 +102,45 @@ const scenarios: Scenario[] = [
     ],
   })),
   {
+    checks: allChecks.map((check) =>
+      check === 'pnpm format --list-different' ? 'pnpm exec prettier --check .' : check,
+    ),
+    name: 'prettier-yml-scoped',
+    steps: [
+      {
+        mode: 'setup',
+        options: {
+          ...newRepository,
+          catalogs: 'none',
+          formatter: 'prettier',
+          workflowExtension: 'yml',
+        },
+      },
+      { mode: 'transition', options: { newPackage: '@example/scoped' } },
+    ],
+  },
+  {
+    checks: [
+      'pnpm build',
+      'pnpm test',
+      'pnpm test:coverage',
+      'pnpm typecheck',
+      'pnpm lint',
+      'pnpm exec prettier --check .',
+      'pnpm knip',
+      'pnpm lint:spelling',
+      'pnpm dedupe --check',
+    ],
+    name: 'pnpm-tasks-named-prettier',
+    steps: [
+      {
+        mode: 'setup',
+        options: { ...newRepository, catalogs: 'named', formatter: 'prettier', taskRunner: 'pnpm' },
+      },
+      { mode: 'transition', options: { newPackage: 'second' } },
+    ],
+  },
+  {
     checks: allChecks,
     name: 'cli',
     steps: [
