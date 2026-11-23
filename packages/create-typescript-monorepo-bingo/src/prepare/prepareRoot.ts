@@ -16,7 +16,12 @@ import {
   readText,
 } from '../utils/files.ts';
 import { pin, tryPin } from '../utils/pins.ts';
-import { isProtocolSpecifier, parseNpmAlias, resolveSpecifier } from '../utils/versions.ts';
+import {
+  getMinimumVersion,
+  isProtocolSpecifier,
+  parseNpmAlias,
+  resolveSpecifier,
+} from '../utils/versions.ts';
 
 export interface PackageManifest {
   author?: string | { email?: string; name?: string };
@@ -110,6 +115,8 @@ export function prepareRoot(
     ...(workspacePackages.some(extendsRootTSConfig) && { rootTSConfigExtended: true }),
     ...inferTitle(files),
     ...inferTypeScript7Alias(rootManifest, workspace),
+    ...(!('typescript7Alias' in inferTypeScript7Alias(rootManifest, workspace)) &&
+      keepsTypeScript(files, rootManifest, workspacePackages) && { typescriptKept: true }),
     ...inferChoices(files, rootManifest, workspacePackages),
     // Choices made explicitly before, which the files alone may not show.
     ...readChoices(files),
@@ -130,45 +137,80 @@ function inferChoices(
 }
 
 /**
- * Finds choices that differ from what a repository's files alone would infer, which later
- * transitions therefore need to be told, along with ones already remembered.
+ * Finds choices that wouldn't be inferred from a repository's files once CTM has written
+ * its own, so they need to be remembered.
  */
 export function findExplicitChoices(files: IntakeDirectory, options: RootOptions): Choices {
-  const workspace = readWorkspaceYaml(files);
+  const formatter = options.formatter ?? 'oxfmt';
+  const linter = options.linter ?? 'eslint';
+  const testRunner = options.testRunner ?? 'vitest';
+  const explicit: Choices = { ...(linter !== 'eslint' && { linter }) };
+
+  // A new repository's files always show its formatter and test runner.
+  if (!Object.keys(files).length) {
+    return explicit;
+  }
+
+  const written: IntakeDirectory = {
+    ...files,
+    ...(formatter === 'oxfmt' && { 'oxfmt.config.ts': [''] }),
+    ...(formatter === 'prettier' && { '.prettierrc': [''] }),
+    ...(testRunner === 'vitest' && { 'vitest.config.ts': [''] }),
+  };
   const inferred: Choices = {
     formatter: 'oxfmt',
-    linter: 'eslint',
     testRunner: 'vitest',
-    // A new repository has nothing to infer from: the defaults above are its own.
-    ...(Object.keys(files).length > 0 &&
-      inferChoices(
-        files,
-        readJson(files, 'package.json'),
-        findWorkspacePackages(files, workspace?.packages ?? ['packages/*']),
-      )),
+    ...inferChoices(
+      written,
+      readJson(files, 'package.json'),
+      findWorkspacePackages(files, readWorkspaceYaml(files)?.packages ?? ['packages/*']),
+    ),
   };
-  return getExplicitChoices(options, inferred, readChoices(files));
+  return {
+    ...(formatter !== inferred.formatter && { formatter }),
+    ...explicit,
+    ...(testRunner !== inferred.testRunner && { testRunner }),
+  };
 }
 
 /**
- * Picks the choices to remember, given what would be inferred and what already is.
+ * Whether a repository's TypeScript can't become CTM's TypeScript 6 and 7 aliases: it's
+ * older than 6, or tsconfigs use options TypeScript 7 removed, which TypeScript 6 only
+ * accepts with ignoreDeprecations. One that already has the aliases already runs them.
  */
-export function getExplicitChoices(
-  options: RootOptions,
-  inferred: Choices = {},
-  remembered: Choices = {},
-): Choices {
-  const current: Required<Choices> = {
-    formatter: options.formatter ?? 'oxfmt',
-    linter: options.linter ?? 'eslint',
-    testRunner: options.testRunner ?? 'vitest',
-  };
-  return Object.fromEntries(
-    Object.entries(current).filter(
-      ([name, value]) =>
-        name in remembered || (inferred as Record<string, unknown>)[name] !== value,
-    ),
+function keepsTypeScript(
+  files: IntakeDirectory,
+  manifest: PackageManifest | undefined,
+  packages: WorkspacePackage[],
+) {
+  const typescript = manifest && getAllDependencies(manifest).typescript;
+  const minimum = getMinimumVersion(
+    'typescript',
+    typescript,
+    readText(files, 'pnpm-workspace.yaml'),
   );
+  return (
+    !!minimum &&
+    (minimum.major < 6 ||
+      [files, ...packages.map((pkg) => pkg.files)].some(ignoresDeprecations) ||
+      Object.values(manifest?.scripts ?? {}).some((script) =>
+        script.includes('--ignoreDeprecations'),
+      ))
+  );
+}
+
+function ignoresDeprecations(directory: IntakeDirectory) {
+  return Object.keys(directory)
+    .filter((name) => /^tsconfig.*\.json$/.test(name))
+    .some((name) => {
+      try {
+        const { compilerOptions } = parseJsonText(readText(directory, name), name);
+        const value = (compilerOptions as Record<string, unknown> | undefined)?.ignoreDeprecations;
+        return typeof value === 'string' && value.startsWith('6');
+      } catch {
+        return false;
+      }
+    });
 }
 
 interface WorkspaceYaml {

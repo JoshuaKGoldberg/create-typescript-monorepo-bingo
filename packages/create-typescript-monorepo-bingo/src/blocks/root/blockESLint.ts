@@ -510,7 +510,8 @@ function keepsVitestLint(
   const hasRootConfig =
     readText(files, 'vitest.config.ts') !== undefined || options.vitestConfig !== undefined;
   return (
-    !!existing?.includes('@vitest/eslint-plugin') &&
+    // As CTM imports it: a repository's own Vitest rules don't need CTM's too.
+    /import vitest from ['"]@vitest\/eslint-plugin['"]/.test(existing ?? '') &&
     !hasRootConfig &&
     ['.', ...(options.packages ?? []).map((pkg) => pkg.directory)].some((directory) => {
       const path = directory === '.' ? 'package.json' : `${directory}/package.json`;

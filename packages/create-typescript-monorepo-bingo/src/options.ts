@@ -133,6 +133,10 @@ export const rootOptionsShape = {
     .string()
     .optional()
     .describe('dependency name that aliases TypeScript 7 for the tsc binary'),
+  typescriptKept: z
+    .boolean()
+    .optional()
+    .describe("inferred: the repository's TypeScript can't become CTM's aliases"),
   vitestConfigUnowned: z
     .boolean()
     .optional()

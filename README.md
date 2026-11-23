@@ -79,7 +79,7 @@ Set `--typescript7Alias` to use a different name; an existing alias, such as fli
 ## Options
 
 Options are inferred from an existing repository's files, and prompted for in new ones.
-`--formatter`, `--linter` and `--testRunner` values that differ from what would be inferred are kept in the transitions workflow's command, for later transitions to use.
+`--formatter`, `--linter` and `--testRunner` values that later transitions wouldn't infer are kept in the root `package.json`, under `create-typescript-monorepo-bingo`.
 
 | Option                    | Description                                                                        | Default                                |
 | ------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------- |
@@ -154,8 +154,7 @@ A transition adds what a repository is missing and leaves what it has:
 - `cspell.json` gets words for the owner, author, repository, scope, title and new package names CTM writes, but not for descriptions, which are your own prose: add any uncommon words in them.
 - A repository with both Prettier and Biome is taken to format with Prettier, unless told `--formatter biome`.
 - In Biome repositories, CTM formats the files it writes with `biome check --write` and adds no formatter of its own; its ESLint config leaves import and export sorting to Biome.
-- A root TypeScript older than 6 is kept, without the TypeScript 7 alias, whose `tsc` would replace it; a suggestion says to update. Updating TypeScript 6 can step back a patch version, to the newest `@typescript/typescript6`.
-- A root TypeScript is also kept where any tsconfig uses `ignoreDeprecations` for options TypeScript 7 removed. Otherwise, an existing repository's `tsc` becomes TypeScript 7's.
+- A root TypeScript older than 6, or with tsconfigs using `ignoreDeprecations` for options TypeScript 7 removed, is kept. Without the TypeScript 6 and 7 aliases, CTM doesn't add its build package, `tsc -b` type checking or root tsconfig settings there, until a `--newPackage` needs the build package, whose sources an older `tsc` may then reject. Otherwise, an existing repository's `tsc` becomes TypeScript 7's, and TypeScript 6 can step back a patch version.
 - With ESLint older than 9, CTM doesn't set up its ESLint config; a suggestion says to update.
 - A root `tsconfig.json` that packages extend is left as it is, without a `tsc -b` typecheck, since packages would inherit what CTM adds to it.
 - Oxfmt can't load `oxfmt.config.ts` in a root with `"type": "commonjs"`; a suggestion says so.

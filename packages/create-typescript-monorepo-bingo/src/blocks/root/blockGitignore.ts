@@ -92,7 +92,9 @@ export const blockGitignore = rootBase.createBlock({
     // An existing entry, like build/, may hide the directories of packages CTM creates.
     const hidden: string[] = [];
     // Without libraries, there's no build package unless it already exists.
-    const hasBuild = (options.packages ?? []).some((pkg) => pkg.kind === 'library');
+    const hasBuild =
+      (!options.typescriptKept || !!options.newPackage) &&
+      (options.packages ?? []).some((pkg) => pkg.kind === 'library');
     for (const pkg of options.packages ?? []) {
       const isHidden = () =>
         ignoreMatcher().add(lines.join('\n')).ignores(`${pkg.directory}/package.json`);

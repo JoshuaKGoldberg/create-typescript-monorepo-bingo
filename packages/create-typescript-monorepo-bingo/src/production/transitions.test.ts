@@ -1275,7 +1275,7 @@ describe('round 11 regressions', () => {
 });
 
 describe('round 17 regressions', () => {
-  const workflowPath = '.github/workflows/transitions.yaml';
+  const choicesText = '"create-typescript-monorepo-bingo": {';
   const editJson = (
     files: IntakeDirectory,
     path: string,
@@ -1286,24 +1286,26 @@ describe('round 17 regressions', () => {
     setFile(files, path, JSON.stringify(json, null, 2));
   };
 
-  it('remembers nothing for a repository with the defaults', () => {
-    expect(getFile(createRepository(), workflowPath)).toContain(
-      '--mode transition --offline --skip-requests',
-    );
-  });
+  it.each([{}, { formatter: 'prettier' }, { formatter: 'none' }, { testRunner: 'other' }] as const)(
+    'remembers nothing for %o, which files show',
+    (options) => {
+      const files = createRepository(options);
 
-  it.each([
-    { linter: 'none' },
-    { formatter: 'none' },
-    { formatter: 'prettier' },
-    { testRunner: 'other' },
-  ] as const)('remembers %o from setup on later transitions', (options) => {
-    const files = createRepository(options);
+      expect(getFile(files, 'package.json')).not.toContain(choicesText);
+      expect(applyFiles(files, transition(files).files)).toEqual([]);
+      applyFiles(files, transition(files, { newPackage: 'second' }).files);
+      expect(applyFiles(files, transition(files).files)).toEqual([]);
+      expect(getFile(files, 'package.json')).not.toContain(choicesText);
+    },
+  );
 
-    expect(getFile(files, workflowPath)).toContain(Object.entries(options).flat().join(' '));
-    expect(applyFiles(files, transition(files).files)).toEqual([]);
-    applyFiles(files, transition(files, { newPackage: 'second' }).files);
-    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  it('follows a repository that moves to another formatter', () => {
+    const files = createRepository({ formatter: 'prettier' });
+    setFile(files, 'oxfmt.config.ts', 'export default {};\n');
+
+    expect(
+      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).formatter,
+    ).not.toBe('prettier');
   });
 
   it('leaves ESLint out with --linter none', () => {
@@ -1330,31 +1332,21 @@ describe('round 17 regressions', () => {
 
     applyFiles(files, transition(files, { linter: 'eslint' }).files);
     expect(getFile(files, 'eslint.config.ts')).toBeDefined();
-    expect(getFile(files, workflowPath)).toContain('--linter eslint');
+    expect(getFile(files, 'package.json')).not.toContain(choicesText);
     expect(applyFiles(files, transition(files).files)).toEqual([]);
   });
 
-  it("only changes the flag in a repository's own transitions workflow", () => {
-    const files = createRepository();
-    const workflow = (getFile(files, workflowPath) ?? '').replace(
-      '--skip-requests',
-      '--skip-requests && echo done # ours',
-    );
-    setFile(files, workflowPath, workflow);
-    applyFiles(files, transition(files, { linter: 'none' }).files);
+  it('keeps --linter none from setup, and other values next to it', () => {
+    const files = createRepository({ linter: 'none' });
+    expect(getFile(files, 'package.json')).toContain(choicesText);
+    editJson(files, 'package.json', (manifest) => {
+      (manifest['create-typescript-monorepo-bingo'] as Record<string, string>).own = 'value';
+    });
 
-    expect(getFile(files, workflowPath)).toBe(
-      workflow.replace('--mode transition', '--mode transition --linter none'),
-    );
-  });
-
-  it("suggests flags when it can't find its command", () => {
-    const files = createRepository();
-    setFile(files, workflowPath, 'name: Ours\non: push\njobs:\n  transition:\n    steps: []\n');
-
-    expect(transition(files, { linter: 'none' }).suggestions).toContainEqual(
-      expect.stringContaining('--linter none'),
-    );
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+    applyFiles(files, transition(files, { linter: 'eslint' }).files);
+    expect(getFile(files, 'package.json')).toContain('"own": "value"');
+    expect(getFile(files, 'package.json')).not.toContain('"linter"');
   });
 
   it.each([
@@ -1407,11 +1399,6 @@ describe('round 17 regressions', () => {
 
   it('lets Prettier win over Biome, unless told otherwise', () => {
     const files = createRepository({ formatter: 'prettier' });
-    setFile(
-      files,
-      workflowPath,
-      (getFile(files, workflowPath) ?? '').replace(' --formatter prettier', ''),
-    );
     setFile(files, 'biome.json', '{}');
     editJson(files, 'package.json', (manifest) => {
       (manifest.devDependencies as Record<string, string>)['@biomejs/biome'] = '^2.0.0';
@@ -1453,13 +1440,54 @@ describe('round 17 regressions', () => {
     editJson(files, 'packages/example/tsconfig.json', (tsconfig) => {
       tsconfig.compilerOptions = { baseUrl: '.', ignoreDeprecations: '6.0' };
     });
+    delete (files.packages as Record<string, unknown>).build;
+    const rootTSConfig = '{ "include": ["packages/*/src"] }\n';
+    const settings = '{ "typescript.tsdk": "node_modules/typescript/lib" }\n';
+    setFile(files, 'tsconfig.json', rootTSConfig);
+    setFile(files, '.vscode/settings.json', settings);
     const creation = transition(files);
     applyFiles(files, creation.files);
 
     expect(getFile(files, 'package.json')).toContain('"typescript": "^6.0.2"');
     expect(getFile(files, 'package.json')).not.toContain('typescript7');
+    expect(getFile(files, 'tsconfig.json')).toBe(rootTSConfig);
+    expect(getFile(files, 'packages/build/package.json')).toBeUndefined();
+    expect(getFile(files, '.vscode/settings.json')).toContain('node_modules/typescript/lib');
     expect(creation.suggestions).toContainEqual(expect.stringContaining('ignoreDeprecations'));
     expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it("doesn't count ignoreDeprecations in fixtures or comments", () => {
+    const files = createRepository();
+    editJson(files, 'package.json', (manifest) => {
+      const devDependencies = manifest.devDependencies as Record<string, string>;
+      devDependencies.typescript = '^6.0.2';
+      delete devDependencies.typescript7;
+    });
+    const tsconfig = '{ "compilerOptions": { "ignoreDeprecations": "6.0" } }';
+    setFile(files, 'packages/example/test/fixture/tsconfig.json', tsconfig);
+    setFile(files, 'tsconfig.other.json', '{\n  // "ignoreDeprecations": "6.0"\n}\n');
+
+    expect(getFile(transition(files).files, 'package.json')).toContain('"typescript7"');
+  });
+
+  it("doesn't add CTM's Vitest rules next to a repository's own", () => {
+    const files = createRepository({ testRunner: 'other' });
+    setFile(
+      files,
+      'eslint.config.ts',
+      (getFile(files, 'eslint.config.ts') ?? '').replace(
+        "import tseslint from 'typescript-eslint';",
+        "import tseslint from 'typescript-eslint';\nimport vitestPlugin from '@vitest/eslint-plugin';",
+      ),
+    );
+    editJson(files, 'packages/example/package.json', (manifest) => {
+      (manifest.devDependencies as Record<string, string>).vitest = '^5.0.0';
+    });
+
+    expect(getFile(transition(files).files, 'eslint.config.ts')).not.toContain(
+      'vitest.configs.recommended',
+    );
   });
 
   it("doesn't un-ignore a build package that isn't created", () => {

@@ -1,4 +1,3 @@
-import type { IntakeDirectory } from 'bingo-fs';
 import semver from 'semver';
 import { z } from 'zod';
 
@@ -133,19 +132,6 @@ export const blockBuildPackage = rootBase.createBlock({
       ...(rootScripts.typecheck !== undefined &&
         rootScripts.typecheck !== 'tsc -b' && { ownTypecheck: true }),
       ...(rootTypeScript && { rootTypeScript }),
-      // TypeScript 6 only accepts options TypeScript 7 removed with ignoreDeprecations. A
-      // root that already has the TypeScript 7 alias already runs its tsc.
-      ...(rootTypeScript &&
-        options.typescript7Alias === undefined &&
-        (usesRemovedOptions(files) ||
-          Object.values(rootScripts).some((script) =>
-            script?.includes('--ignoreDeprecations'),
-          )) && {
-          keepsTypeScript: true,
-        }),
-      ...(rootTypeScript && {
-        rootTypeScriptMajor: getMinimumVersion('typescript', rootTypeScript, workspaceText)?.major,
-      }),
       ...(rootBuild !== undefined && { rootBuild }),
       ...(rootTsdownSpecifier && { rootTsdownSpecifier }),
       ...(rootTsdownSpecifier && {
@@ -168,9 +154,7 @@ export const blockBuildPackage = rootBase.createBlock({
     ownTypecheck: z.boolean().optional(),
     rootHasTypecheck: z.boolean().optional(),
     rootRunsTsc: z.boolean().optional(),
-    keepsTypeScript: z.boolean().optional(),
     rootTypeScript: z.string().optional(),
-    rootTypeScriptMajor: z.number().optional(),
     olderLibraryTsdown: z.array(z.string()).optional(),
     rootTsdownMinimum: z.string().optional(),
     rootTsdownSpecifier: z.string().optional(),
@@ -194,6 +178,16 @@ export const blockBuildPackage = rootBase.createBlock({
       !(options.packages ?? []).some((pkg) => pkg.kind === 'library')
     ) {
       return {};
+    }
+
+    const keptTypeScript = `CTM kept this repository's TypeScript ${props.rootTypeScript ?? ''}, because it's older than 6 or tsconfigs use ignoreDeprecations for options TypeScript 7 removed. Update those and re-run to set up its build package and type checking.`;
+    // Nothing existing needs a build package, whose sources an older tsc may reject.
+    if (
+      options.typescriptKept &&
+      props.existing?.packageJson === undefined &&
+      !options.newPackage
+    ) {
+      return { suggestions: [keptTypeScript] };
     }
 
     const existingTexts = props.existing ?? {};
@@ -236,7 +230,7 @@ export const blockBuildPackage = rootBase.createBlock({
       ownsBase
         ? {
             tsdown: pin('tsdown'),
-            typescript: props.keepsTypeScript
+            typescript: options.typescriptKept
               ? (props.rootTypeScript ?? typescriptSpecifier())
               : typescriptSpecifier(),
           }
@@ -273,9 +267,7 @@ export const blockBuildPackage = rootBase.createBlock({
     const typescript7Alias = getTypeScript7Alias(options);
     // TypeScript 7's alias would take over the tsc bin from a root TypeScript older than 6,
     // which, unlike TypeScript 6's, ships its own.
-    const addsTypeScript7 =
-      !props.keepsTypeScript &&
-      (props.rootTypeScriptMajor === undefined || props.rootTypeScriptMajor >= 6);
+    const addsTypeScript7 = !options.typescriptKept;
     // Knip only sees the alias used through a root script that runs tsc.
     const typescript7Unseen =
       addsTypeScript7 &&
@@ -285,16 +277,7 @@ export const blockBuildPackage = rootBase.createBlock({
     return {
       suggestions: [
         ...(ownsBase ? [] : [describeUnownedFile('packages/build/src/tsdown/base.ts')]),
-        ...(props.keepsTypeScript
-          ? [
-              `This repository uses ignoreDeprecations for options TypeScript 7 removed, so CTM kept its TypeScript ${props.rootTypeScript ?? ''}. Stop using them and re-run to type check with TypeScript 7.`,
-            ]
-          : []),
-        ...(addsTypeScript7 || props.keepsTypeScript
-          ? []
-          : [
-              `The root's TypeScript ${props.rootTypeScript ?? ''} is older than 6, so CTM didn't add TypeScript 7 as ${typescript7Alias}, whose tsc would replace it. Update to TypeScript 6 and re-run to type check with both.`,
-            ]),
+        ...(options.typescriptKept ? [keptTypeScript] : []),
         // An existing tsdown is kept, but packages' configs spread a base typed for CTM's.
         ...(props.rootTsdownMinimum && semver.lt(props.rootTsdownMinimum, pin('tsdown'))
           ? [
@@ -351,9 +334,11 @@ export const blockBuildPackage = rootBase.createBlock({
           packages: ['packages/build'],
           // The typescript alias's own lib/ has no tsserver.js, so editors get TypeScript 6
           // from the real compiler package it wraps, hoisted to a stable path.
-          settings: { publicHoistPattern: ['@typescript/old'] },
+          ...(addsTypeScript7 && { settings: { publicHoistPattern: ['@typescript/old'] } }),
         }),
-        blockVSCode({ settings: { 'js/ts.tsdk.path': 'node_modules/@typescript/old/lib' } }),
+        ...(addsTypeScript7
+          ? [blockVSCode({ settings: { 'js/ts.tsdk.path': 'node_modules/@typescript/old/lib' } })]
+          : []),
         blockRootPackageJson({
           devDependencies: {
             // CTM's tsdown base runs attw and publint.
@@ -364,7 +349,7 @@ export const blockBuildPackage = rootBase.createBlock({
             '@types/node': pin('@types/node'),
             ...(rootUsesBuildPackage && { [name]: 'workspace:^' }),
             tsdown: pin('tsdown'),
-            ...(!props.keepsTypeScript && { typescript: typescriptSpecifier() }),
+            ...(!options.typescriptKept && { typescript: typescriptSpecifier() }),
             ...(addsTypeScript7 && { [typescript7Alias]: typescript7Specifier() }),
           },
           scripts: {
@@ -434,18 +419,3 @@ export const blockBuildPackage = rootBase.createBlock({
     };
   },
 });
-
-/**
- * Whether any tsconfig sets ignoreDeprecations for options TypeScript 7 removed.
- */
-function usesRemovedOptions(directory: IntakeDirectory): boolean {
-  return Object.entries(directory).some(([name, entry]) => {
-    if (name === 'node_modules' || !entry) {
-      return false;
-    }
-
-    return Array.isArray(entry)
-      ? /^(?:ts|js)config.*\.json$/.test(name) && /"ignoreDeprecations"\s*:\s*"6/.test(entry[0])
-      : usesRemovedOptions(entry);
-  });
-}

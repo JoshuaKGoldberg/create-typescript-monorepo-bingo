@@ -255,7 +255,7 @@ ${
 }
 ${
   // Packages extending the root tsconfig.json leave it without a tsc -b typecheck.
-  options.rootTSConfigExtended
+  options.rootTSConfigExtended || options.typescriptKept
     ? ''
     : `## Type Checking
 

@@ -40,6 +40,11 @@ export const blockRootTSConfig = rootBase.createBlock({
     rootNotModule: z.boolean().optional(),
   },
   produce({ options, props }) {
+    // A TypeScript that's kept type checks as it did, without CTM's own files.
+    if (options.typescriptKept && !props.hasBuildPackage && !options.newPackage) {
+      return {};
+    }
+
     // Packages that extend the root tsconfig.json would inherit what CTM adds to it, like
     // noEmit and include, so it's left as it is.
     if (options.rootTSConfigExtended) {

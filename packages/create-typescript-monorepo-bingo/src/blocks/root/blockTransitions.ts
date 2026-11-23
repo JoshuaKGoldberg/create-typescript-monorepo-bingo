@@ -2,9 +2,7 @@ import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
-import { findExplicitChoices, getExplicitChoices } from '../../prepare/prepareRoot.ts';
 import { action } from '../../utils/actions.ts';
-import { choiceValues, printChoices, updateWorkflowChoices } from '../../utils/choices.ts';
 import { readText } from '../../utils/files.ts';
 import { getWorkflowPath } from '../../utils/options.ts';
 import { formatYamlFile } from '../../utils/yaml.ts';
@@ -23,29 +21,13 @@ export const blockTransitions = rootBase.createBlock({
       files,
       `.github/workflows/${getWorkflowPath(options, 'transitions')}`,
     );
-    return {
-      ...(existing !== undefined && { existing }),
-      choices: findExplicitChoices(files, options),
-    };
+    return existing === undefined ? undefined : { existing };
   },
   props: {
-    choices: z
-      .object({
-        formatter: z.enum(choiceValues.formatter).optional(),
-        linter: z.enum(choiceValues.linter).optional(),
-        testRunner: z.enum(choiceValues.testRunner).optional(),
-      })
-      .optional(),
     existing: z.string().optional(),
   },
   produce({ options, props }) {
     const app = options.releaseApp ?? defaults.releaseApp;
-    // A new repository's choices are remembered when they aren't the defaults.
-    const choices =
-      props.choices ??
-      getExplicitChoices(options, { formatter: 'oxfmt', linter: 'eslint', testRunner: 'vitest' });
-    const updated =
-      props.existing === undefined ? undefined : updateWorkflowChoices(props.existing, choices);
 
     // The template's own repository transitions itself with its own source.
     const self = options.packages?.find((pkg) => pkg.name === 'create-typescript-monorepo-bingo');
@@ -70,7 +52,7 @@ export const blockTransitions = rootBase.createBlock({
             { uses: '$/.github/actions/setup' },
             {
               name: 'Transition',
-              run: `${command} --mode transition${printChoices(choices)} --offline --skip-requests`,
+              run: `${command} --mode transition --offline --skip-requests`,
             },
             {
               // CI installs with a frozen lockfile, so the transition's own install can't
@@ -111,29 +93,19 @@ export const blockTransitions = rootBase.createBlock({
     return {
       // Without an inferred App, the defaults need setting up before releases and
       // transitions can run.
-      suggestions: [
-        ...(props.existing !== undefined && updated === undefined && printChoices(choices)
-          ? [
-              `CTM couldn't find its command in the transitions workflow. Add these flags to it, so later transitions keep your choices:${printChoices(choices)}`,
-            ]
-          : []),
-        ...(options.releaseApp === undefined && props.existing === undefined
+      suggestions:
+        options.releaseApp === undefined && props.existing === undefined
           ? [
               `The transitions workflow, and CTM's release workflow where it adds one, use a GitHub App: set the ${app}_CLIENT_ID Actions variable and the ${app}_PRIVATE_KEY secret, or re-run with --releaseApp to use another prefix.`,
             ]
-          : []),
-      ],
+          : [],
       files: {
         '.github': {
           workflows: {
-            [getWorkflowPath(options, 'transitions')]: formatYamlFile(
-              workflow,
-              updated ?? props.existing,
-              {
-                name: `.github/workflows/transitions.${options.workflowExtension ?? 'yaml'}`,
-                workflow: true,
-              },
-            ).replace('workflow_dispatch: null', 'workflow_dispatch: ~'),
+            [getWorkflowPath(options, 'transitions')]: formatYamlFile(workflow, props.existing, {
+              name: `.github/workflows/transitions.${options.workflowExtension ?? 'yaml'}`,
+              workflow: true,
+            }).replace('workflow_dispatch: null', 'workflow_dispatch: ~'),
           },
         },
       },

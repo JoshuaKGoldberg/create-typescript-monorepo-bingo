@@ -4,7 +4,9 @@ import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
+import { findExplicitChoices } from '../../prepare/prepareRoot.ts';
 import { type Dependencies, resolveDependencies } from '../../utils/catalogs.ts';
+import { choicesKey } from '../../utils/choices.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatPackageJson, mergeScripts, sortKeys } from '../../utils/json.ts';
 import { getAuthor, getRepositoryUrl } from '../../utils/options.ts';
@@ -22,15 +24,17 @@ export const blockRootPackageJson = rootBase.createBlock({
   about: {
     name: 'Root package.json',
   },
-  intake({ files }) {
+  intake({ files, options }) {
     const existing = readText(files, 'package.json');
     const workspace = readText(files, 'pnpm-workspace.yaml');
     return {
+      choices: findExplicitChoices(files, options),
       ...(existing !== undefined && { existing }),
       ...(workspace !== undefined && { workspace }),
     };
   },
   props: {
+    choices: z.record(z.string(), z.string()).optional(),
     devDependencies: dependenciesSchema.optional(),
     existing: z.string().optional(),
     workspace: z.string().optional(),
@@ -55,6 +59,14 @@ export const blockRootPackageJson = rootBase.createBlock({
     );
     const dependencies = alignCompanions(existingDevDependencies, resolved, props.workspace);
 
+    // Other values a repository may hold there are kept.
+    const otherChoices = Object.fromEntries(
+      Object.entries(existing[choicesKey] ?? {}).filter(
+        ([name]) => !['formatter', 'linter', 'testRunner'].includes(name),
+      ),
+    ) as Record<string, unknown>;
+    const choices = { ...otherChoices, ...(props.choices ?? findExplicitChoices({}, options)) };
+
     const packageJson = {
       ...(props.existing === undefined
         ? {
@@ -68,6 +80,7 @@ export const blockRootPackageJson = rootBase.createBlock({
           }
         : existing),
       private: true,
+      [choicesKey]: Object.keys(choices).length ? choices : undefined,
       // The weekly transitions workflow infers the owner and repository from here.
       ...(props.existing !== undefined &&
         !existing.repository && {
