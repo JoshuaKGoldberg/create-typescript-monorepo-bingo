@@ -1,0 +1,10 @@
+packages:
+  - 'packages/*'
+
+permissions:
+  nx:
+    build: false
+  simple-git-hooks:
+    build: false
+
+trustPolicy: no-downgrade

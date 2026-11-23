@@ -1,0 +1,22 @@
+{
+  "name": "@ctm/build",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared build configs for create-typescript-monorepo-bingo",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo",
+    "directory": "packages/build"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./package.json": "./package.json",
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./tsdown": "./src/tsdown/index.ts"
+  },
+  "dependencies": {
+    "tsdown": "^0.23.7",
+    "typescript": "npm:@typescript/typescript6@6.0.2"
+  }
+}

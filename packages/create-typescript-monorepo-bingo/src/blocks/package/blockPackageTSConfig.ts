@@ -1,0 +1,95 @@
+import { z } from 'zod';
+
+import { packageBase } from '../../bases/packageBase.ts';
+import { asPackageExtension } from '../../production/asRootExtension.ts';
+import { parseJsonText, readText } from '../../utils/files.ts';
+import { formatJson, withDefaults } from '../../utils/json.ts';
+import { mergeList } from '../../utils/lists.ts';
+import { getBuildPackageName } from '../../utils/options.ts';
+import { blockRootTSConfig } from '../root/blockRootTSConfig.ts';
+
+interface TSConfig {
+  compilerOptions?: Record<string, unknown>;
+  references?: { path: string }[];
+}
+
+/**
+ * Owns a package's `tsconfig.json`, which extends the build package's base and
+ * references the workspace packages it depends on. Adds the package to the root
+ * tsconfig's references, so `tsc -b` covers it.
+ */
+export const blockPackageTSConfig = packageBase.createBlock({
+  about: {
+    name: 'Package TSConfig',
+  },
+  intake({ files }) {
+    const existing = readText(files, 'tsconfig.json');
+    return existing === undefined ? undefined : { existing };
+  },
+  props: {
+    existing: z.string().optional(),
+  },
+  produce({ options, props }) {
+    const { package: pkg } = options;
+    const existing = parseJsonText(props.existing) as TSConfig & Record<string, unknown>;
+
+    const libraries = new Map(
+      (options.packages ?? [])
+        .filter((other) => other.kind === 'library')
+        .map((other) => [other.name, other]),
+    );
+    const computed = (pkg.workspaceDependencies ?? [])
+      .map((dependency) => libraries.get(dependency))
+      .filter((dependency) => dependency !== undefined)
+      .map((dependency) => relativeTo(pkg.directory, dependency.directory));
+
+    // Existing references keep their order; newly needed ones are appended.
+    const existingPaths = (existing.references ?? []).map((reference) => reference.path);
+    const references = mergeList(
+      existingPaths.length ? existingPaths : undefined,
+      computed,
+      () => 0,
+    );
+
+    const compilerOptions: Record<string, unknown> = withDefaults(existing.compilerOptions, {
+      outDir: 'lib',
+      rootDir: 'src',
+      tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.src.json',
+      // Existing packages keep their own choice of whether to use Node.js types.
+      ...(props.existing === undefined && { types: ['node'] }),
+    });
+
+    if (pkg.isolatedDeclarations) {
+      compilerOptions.isolatedDeclarations = true;
+    } else {
+      delete compilerOptions.isolatedDeclarations;
+    }
+
+    return {
+      extensions: [asPackageExtension(blockRootTSConfig({ references: [pkg.directory] }))],
+      files: {
+        'tsconfig.json': formatJson(
+          {
+            extends: `${getBuildPackageName(options)}/tsconfig.base.json`,
+            ...existing,
+            compilerOptions,
+            include: existing.include ?? ['src'],
+            ...(references.length && { references: references.map((path) => ({ path })) }),
+          },
+          props.existing,
+        ),
+      },
+    };
+  },
+});
+
+function relativeTo(from: string, to: string) {
+  const fromSegments = from.split('/');
+  const toSegments = to.split('/');
+  let common = 0;
+  while (fromSegments[common] === toSegments[common]) {
+    common += 1;
+  }
+
+  return [...fromSegments.slice(common).map(() => '..'), ...toSegments.slice(common)].join('/');
+}

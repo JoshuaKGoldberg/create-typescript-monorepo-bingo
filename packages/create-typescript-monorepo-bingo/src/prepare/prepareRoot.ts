@@ -1,0 +1,381 @@
+import type { TemplatePrepareContext } from 'bingo';
+import type { CreatedDirectory, IntakeDirectory } from 'bingo-fs';
+import { parse as parseYaml } from 'yaml';
+
+import type { CatalogMode, PackageKind, PackageSpec, RootOptions, TaskRunner } from '../options.ts';
+import { dependencyFields, type DependencyField } from '../utils/catalogs.ts';
+import { getDirectory, getEntry, readJson, readText } from '../utils/files.ts';
+import { pin, tryPin } from '../utils/pins.ts';
+import { parseNpmAlias, resolveSpecifier } from '../utils/versions.ts';
+
+export interface PackageManifest {
+  author?: string | { email?: string; name?: string };
+  bin?: unknown;
+  contributors?: (string | { email?: string; name?: string })[];
+  description?: string;
+  devDependencies?: Record<string, string>;
+  engines?: { node?: string };
+  name?: string;
+  packageManager?: string;
+  private?: boolean;
+  repository?: string | { url?: string };
+  scripts?: Record<string, string>;
+}
+
+export interface WorkspacePackage {
+  directory: string;
+  files: IntakeDirectory;
+  manifest: PackageManifest;
+}
+
+/**
+ * Infers root options from an existing repository's files.
+ * Every value is optional: in setup mode there are no files, and produce() fills defaults.
+ */
+export function prepareRoot(
+  context: TemplatePrepareContext<Partial<RootOptions>, unknown>,
+): Partial<RootOptions> {
+  const files = context.files as IntakeDirectory | undefined;
+  if (!files || !Object.keys(files).length) {
+    return { catalogs: 'default' };
+  }
+
+  const rootManifest = readJson<PackageManifest>(files, 'package.json');
+  const workspace = readWorkspaceYaml(files);
+  const workspacePackages = findWorkspacePackages(files, workspace?.packages ?? ['packages/*']);
+  const repository = parseRepository(rootManifest?.repository);
+  const author = getFirstPerson(rootManifest);
+  const scope = workspacePackages
+    .map((pkg) => pkg.manifest.name)
+    .find((name) => name?.startsWith('@') && name.endsWith('/build'))
+    ?.replace(/\/build$/, '');
+
+  const catalogs = context.options.catalogs ?? inferCatalogMode(workspace);
+  const packages = workspacePackages.map((pkg) => createPackageSpec(pkg, workspacePackages));
+  const manifests = [
+    ...(rootManifest ? [{ kind: 'root' as const, manifest: rootManifest }] : []),
+    ...workspacePackages.map((pkg, index) => ({
+      kind: packages[index]?.kind,
+      manifest: pkg.manifest,
+    })),
+  ].filter(({ kind }) => kind !== 'site' && kind !== 'repo-owned' && kind !== 'bin-js');
+
+  return {
+    ...(author?.name && { author: author.name }),
+    ...(author?.email && { email: author.email }),
+    catalogs,
+    ...(catalogs === 'default' && { catalogShared: findSharedDependencies(manifests) }),
+    ...(catalogs === 'named' && { catalogExcluded: findNamedConflicts(manifests) }),
+    ...(rootManifest?.description && { description: rootManifest.description }),
+    ...(readText(files, '.nvmrc') && { node: readText(files, '.nvmrc')?.trim() }),
+    ...(rootManifest?.engines?.node && { nodeEngines: rootManifest.engines.node }),
+    ...(repository && repository),
+    packages,
+    ...(rootManifest?.packageManager?.startsWith('pnpm@') && {
+      pnpm: rootManifest.packageManager.slice('pnpm@'.length).split('+')[0],
+    }),
+    ...inferReleaseApp(files),
+    ...(scope && { scope }),
+    taskRunner: inferTaskRunner(files, workspace),
+    ...inferTitle(files),
+    ...inferTypeScript7Alias(rootManifest),
+    ...inferWorkflowExtension(files),
+  };
+}
+
+interface WorkspaceYaml {
+  catalog?: Record<string, string>;
+  catalogs?: Record<string, Record<string, string>>;
+  packages?: string[];
+  tasks?: unknown;
+}
+
+function readWorkspaceYaml(files: IntakeDirectory): undefined | WorkspaceYaml {
+  const text = readText(files, 'pnpm-workspace.yaml');
+  if (!text) {
+    return undefined;
+  }
+
+  try {
+    return parseYaml(text) as undefined | WorkspaceYaml;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Finds workspace packages by matching `packages/*`-style globs against the in-memory files.
+ * Only single-level `<directory>/*` globs and exact directories are supported.
+ */
+export function findWorkspacePackages(
+  files: IntakeDirectory | CreatedDirectory,
+  globs: string[],
+): WorkspacePackage[] {
+  const found: WorkspacePackage[] = [];
+
+  for (const glob of globs) {
+    if (glob.startsWith('!')) {
+      continue;
+    }
+
+    const normalized = glob.replace(/^\.\//, '').replace(/\/$/, '');
+    const candidates = normalized.endsWith('/*')
+      ? Object.keys(getDirectory(files as IntakeDirectory, normalized.slice(0, -2)) ?? {})
+          .sort()
+          .map((name) => `${normalized.slice(0, -2)}/${name}`)
+      : [normalized];
+
+    for (const directory of candidates) {
+      const packageFiles = getDirectory(files as IntakeDirectory, directory);
+      const manifest = readJson<PackageManifest>(packageFiles, 'package.json');
+      if (packageFiles && manifest) {
+        found.push({ directory, files: packageFiles, manifest });
+      }
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Infers what kind of package a workspace directory holds.
+ */
+export function inferPackageKind({ directory, files, manifest }: WorkspacePackage): PackageKind {
+  if (manifest.name?.endsWith('/build') && directory.endsWith('/build')) {
+    return 'build';
+  }
+
+  const dependencies = getAllDependencies(manifest);
+  if (
+    'astro' in dependencies ||
+    getEntry(files, 'astro.config.ts') ||
+    getEntry(files, 'astro.config.mjs')
+  ) {
+    return 'site';
+  }
+
+  if (getEntry(files, 'tsdown.config.ts')) {
+    return 'library';
+  }
+
+  if (manifest.bin && !getEntry(files, 'tsconfig.json')) {
+    return 'bin-js';
+  }
+
+  return 'repo-owned';
+}
+
+function createPackageSpec(pkg: WorkspacePackage, all: WorkspacePackage[]): PackageSpec {
+  const tsconfig = readJson<{ compilerOptions?: { isolatedDeclarations?: boolean } }>(
+    pkg.files,
+    'tsconfig.json',
+  );
+  const dependencies = getAllDependencies(pkg.manifest);
+  const workspaceNames = new Set(all.map((other) => other.manifest.name));
+  const workspaceDependencies = Object.entries(dependencies)
+    .filter(([name, specifier]) => workspaceNames.has(name) && specifier.startsWith('workspace:'))
+    .map(([name]) => name);
+
+  return {
+    ...(pkg.manifest.description && { description: pkg.manifest.description }),
+    directory: pkg.directory,
+    ...(tsconfig?.compilerOptions?.isolatedDeclarations && { isolatedDeclarations: true }),
+    kind: inferPackageKind(pkg),
+    name: pkg.manifest.name ?? pkg.directory.split('/').pop() ?? pkg.directory,
+    ...(pkg.manifest.scripts && { scripts: Object.keys(pkg.manifest.scripts) }),
+    ...(workspaceDependencies.length && { workspaceDependencies }),
+  };
+}
+
+function getAllDependencies(manifest: PackageManifest): Record<string, string> {
+  const record = manifest as Partial<Record<DependencyField, Record<string, string>>>;
+  return Object.assign({}, ...dependencyFields.map((field) => record[field] ?? {})) as Record<
+    string,
+    string
+  >;
+}
+
+function inferCatalogMode(workspace: undefined | WorkspaceYaml): CatalogMode {
+  if (workspace?.catalogs && Object.keys(workspace.catalogs).length) {
+    return 'named';
+  }
+
+  return workspace?.catalog && Object.keys(workspace.catalog).length ? 'default' : 'none';
+}
+
+interface ManifestWithKind {
+  kind: 'root' | PackageKind | undefined;
+  manifest: PackageManifest;
+}
+
+const isLiteral = (specifier: string) =>
+  !/^(?:catalog|workspace|link|file|git\+|git|github|https?|portal):/.test(specifier);
+
+/**
+ * In default catalog mode, finds dependencies that two or more manifests declare,
+ * always with the same specifier.
+ */
+export function findSharedDependencies(manifests: ManifestWithKind[]): string[] {
+  const declarations = new Map<string, Set<string>>();
+  const counts = new Map<string, number>();
+
+  for (const { manifest } of manifests) {
+    for (const [dependency, specifier] of Object.entries(getAllDependencies(manifest))) {
+      if (specifier === 'catalog:' || specifier === 'catalog:default') {
+        counts.set(dependency, (counts.get(dependency) ?? 0) + 2);
+        continue;
+      }
+
+      if (!isLiteral(specifier)) {
+        continue;
+      }
+
+      declarations.set(dependency, (declarations.get(dependency) ?? new Set()).add(specifier));
+      counts.set(dependency, (counts.get(dependency) ?? 0) + 1);
+    }
+  }
+
+  return [...counts]
+    .filter(([dependency, count]) => count >= 2 && (declarations.get(dependency)?.size ?? 0) <= 1)
+    .map(([dependency]) => dependency)
+    .sort();
+}
+
+const namedCatalogs: Partial<Record<DependencyField, string>> = {
+  dependencies: 'prod',
+  devDependencies: 'dev',
+  peerDependencies: 'peer',
+};
+
+/**
+ * In named catalog mode, finds `<catalog>:<dependency>` pairs that manifests declare
+ * with different specifiers. Those stay uncataloged rather than being forced to one version.
+ */
+export function findNamedConflicts(manifests: ManifestWithKind[]): string[] {
+  const specifiers = new Map<string, Set<string>>();
+
+  for (const { kind, manifest } of manifests) {
+    const record = manifest as Partial<Record<DependencyField, Record<string, string>>>;
+    for (const field of dependencyFields) {
+      // The build package's runtime dependencies are development tools.
+      const catalog = kind === 'build' ? 'dev' : namedCatalogs[field];
+      if (!catalog) {
+        continue;
+      }
+
+      for (const [dependency, diskSpecifier] of Object.entries(record[field] ?? {})) {
+        if (!isLiteral(diskSpecifier)) {
+          continue;
+        }
+
+        // Compare what CTM will write, so a version it's about to change doesn't count.
+        const specifier = getWrittenSpecifier(kind, field, dependency, diskSpecifier);
+        const key = `${catalog}:${dependency}`;
+        specifiers.set(key, (specifiers.get(key) ?? new Set()).add(specifier));
+      }
+    }
+  }
+
+  return [...specifiers]
+    .filter(([, values]) => values.size > 1)
+    .map(([key]) => key)
+    .sort();
+}
+
+/**
+ * Approximates the specifier CTM's blocks write for a dependency that's on disk,
+ * for the dependencies those blocks manage with pinned versions.
+ */
+function getWrittenSpecifier(
+  kind: ManifestWithKind['kind'],
+  field: DependencyField,
+  dependency: string,
+  diskSpecifier: string,
+): string {
+  if (kind === 'build' && field === 'dependencies') {
+    const ours =
+      dependency === 'tsdown'
+        ? `^${pin('tsdown')}`
+        : dependency === 'typescript'
+          ? pin('typescript')
+          : undefined;
+    return ours ? resolveSpecifier(diskSpecifier, ours) : diskSpecifier;
+  }
+
+  const pinned = kind === 'root' && field === 'devDependencies' ? tryPin(dependency) : undefined;
+  return pinned ? resolveSpecifier(diskSpecifier, pinned) : diskSpecifier;
+}
+
+function getFirstPerson(manifest: PackageManifest | undefined) {
+  const person = manifest?.author ?? manifest?.contributors?.[0];
+  if (!person) {
+    return undefined;
+  }
+
+  if (typeof person === 'string') {
+    const match = /^([^<(]+?)\s*(?:<([^>]+)>)?/.exec(person);
+    return match?.[1] ? { email: match[2], name: match[1] } : undefined;
+  }
+
+  return person;
+}
+
+function parseRepository(repository: PackageManifest['repository']) {
+  const url = typeof repository === 'string' ? repository : repository?.url;
+  const match = url && /github\.com[/:]([^/]+)\/([^/.#]+)/.exec(url);
+  return match?.[1] && match[2] ? { owner: match[1], repository: match[2] } : undefined;
+}
+
+function inferReleaseApp(files: IntakeDirectory): Partial<RootOptions> {
+  const workflows = getDirectory(files, '.github/workflows');
+  const release = readText(workflows, 'release.yml') ?? readText(workflows, 'release.yaml');
+  const match = release && /vars\.([A-Z0-9_]+)_CLIENT_ID/.exec(release);
+  return match?.[1] ? { releaseApp: match[1] } : {};
+}
+
+function inferTaskRunner(files: IntakeDirectory, workspace: undefined | WorkspaceYaml): TaskRunner {
+  if (getEntry(files, 'turbo.json')) {
+    return 'turbo';
+  }
+
+  if (getEntry(files, 'nx.json')) {
+    return 'nx';
+  }
+
+  return workspace?.tasks ? 'pnpm' : 'none';
+}
+
+function inferTitle(files: IntakeDirectory): Partial<RootOptions> {
+  const readme = readText(files, 'README.md');
+  const match = readme && (/<h1[^>]*>([^<]+)<\/h1>/.exec(readme) ?? /^#\s+(.+)$/m.exec(readme));
+  return match?.[1] ? { title: match[1].trim() } : {};
+}
+
+function inferTypeScript7Alias(manifest: PackageManifest | undefined): Partial<RootOptions> {
+  for (const [name, specifier] of Object.entries(manifest?.devDependencies ?? {})) {
+    const alias = parseNpmAlias(specifier);
+    if (
+      name !== 'typescript' &&
+      alias?.name === 'typescript' &&
+      /^[~^]?7/.test(alias.range ?? '')
+    ) {
+      return { typescript7Alias: name };
+    }
+  }
+
+  return {};
+}
+
+function inferWorkflowExtension(files: IntakeDirectory): Partial<RootOptions> {
+  const workflows = getDirectory(files, '.github/workflows');
+  if (!workflows) {
+    return {};
+  }
+
+  const names = Object.keys(workflows);
+  if (names.some((name) => name.endsWith('.yml'))) {
+    return { workflowExtension: 'yml' };
+  }
+
+  return names.some((name) => name.endsWith('.yaml')) ? { workflowExtension: 'yaml' } : {};
+}

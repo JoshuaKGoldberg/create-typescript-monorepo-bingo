@@ -1,0 +1,11 @@
+{
+  "extends": "@ctm/build/tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "lib",
+    "rootDir": "src",
+    "tsBuildInfoFile": "node_modules/.cache/tsbuild/info.src.json",
+    "types": ["node"]
+  },
+  "include": ["src"],
+  "references": [{ "path": "../build" }]
+}

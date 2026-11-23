@@ -1,0 +1,74 @@
+import { z } from 'zod';
+
+import { rootBase } from '../../bases/rootBase.ts';
+import { parseJsonText, readText } from '../../utils/files.ts';
+import { formatJson } from '../../utils/json.ts';
+import { getBuildPackageName } from '../../utils/options.ts';
+
+interface TSConfigReference {
+  path: string;
+}
+
+/**
+ * Owns the root `tsconfig.json`, which type checks root config files
+ * and references every package for `tsc -b`.
+ * Existing references keep their order; new ones are appended.
+ */
+export const blockRootTSConfig = rootBase.createBlock({
+  about: {
+    name: 'Root TSConfig',
+  },
+  intake({ files }) {
+    const existing = readText(files, 'tsconfig.json');
+    return existing === undefined ? undefined : { existing };
+  },
+  props: {
+    existing: z.string().optional(),
+    include: z.array(z.string()).optional(),
+    references: z.array(z.string()).optional(),
+  },
+  produce({ options, props }) {
+    const existing = parseJsonText(props.existing);
+    const existingReferences = (existing.references as TSConfigReference[] | undefined) ?? [];
+    const references = existingReferences.map((reference) => reference.path);
+    const normalized = new Set(references.map(normalizePath));
+
+    for (const reference of props.references ?? []) {
+      if (!normalized.has(normalizePath(reference))) {
+        normalized.add(normalizePath(reference));
+        references.push(`./${normalizePath(reference)}`);
+      }
+    }
+
+    const include = new Set([
+      ...((existing.include as string[] | undefined) ?? [
+        './*.config.ts',
+        './packages/*/tsdown.config.ts',
+      ]),
+      ...(props.include ?? []),
+    ]);
+
+    return {
+      files: {
+        'tsconfig.json': formatJson(
+          {
+            extends: `${getBuildPackageName(options)}/tsconfig.base.json`,
+            ...existing,
+            compilerOptions: {
+              ...(existing.compilerOptions as object | undefined),
+              noEmit: true,
+              tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.json',
+            },
+            include: [...include],
+            references: references.map((path) => ({ path })),
+          },
+          props.existing,
+        ),
+      },
+    };
+  },
+});
+
+function normalizePath(path: string) {
+  return path.replace(/^\.\//, '').replace(/\/$/, '');
+}

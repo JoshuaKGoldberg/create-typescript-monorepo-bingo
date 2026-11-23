@@ -1,0 +1,100 @@
+import { z } from 'zod';
+
+import { rootBase } from '../../bases/rootBase.ts';
+import { readText } from '../../utils/files.ts';
+import { mergeList } from '../../utils/lists.ts';
+import { pinned } from '../../utils/pins.ts';
+import {
+  printStatic,
+  readConfigLayout,
+  readConfigObject,
+  type StaticObject,
+} from '../../utils/staticConfig.ts';
+import { blockGitHubActionsCI } from './blockGitHubActionsCI.ts';
+import { blockRootPackageJson } from './blockRootPackageJson.ts';
+import { blockVSCode } from './blockVSCode.ts';
+
+const baseIgnorePatterns = [
+  '.all-contributorsrc',
+  '**/CHANGELOG.md',
+  'coverage',
+  'packages/*/dist',
+  'packages/*/lib',
+  'pnpm-lock.yaml',
+];
+
+/**
+ * Owns `oxfmt.config.ts` and the Format-phase script that formats every file CTM writes.
+ * Settings and ignore patterns in an existing config are kept.
+ */
+export const blockOxfmt = rootBase.createBlock({
+  about: {
+    name: 'Oxfmt',
+  },
+  intake({ files }) {
+    const existing = readText(files, 'oxfmt.config.ts');
+    return existing === undefined ? undefined : { existing };
+  },
+  props: {
+    existing: z.string().optional(),
+    ignorePatterns: z.array(z.string()).optional(),
+  },
+  produce({ props }) {
+    const existing = readConfigObject(props.existing) ?? {};
+    const existingIgnores = Array.isArray(existing.ignorePatterns)
+      ? existing.ignorePatterns.filter((pattern) => typeof pattern === 'string')
+      : undefined;
+
+    const config: StaticObject = {
+      overrides: [{ files: ['.nvmrc'], options: { parser: 'yaml' } }],
+      singleQuote: true,
+      sortImports: true,
+      sortPackageJson: false,
+      ...existing,
+      ignorePatterns: mergeList(existingIgnores, [
+        ...baseIgnorePatterns,
+        ...(props.ignorePatterns ?? []),
+      ]),
+    };
+
+    const sorted = Object.fromEntries(
+      Object.entries(config).sort(([a], [b]) => a.localeCompare(b)),
+    ) as StaticObject;
+
+    return {
+      extensions: [
+        blockGitHubActionsCI({
+          jobs: [
+            {
+              id: 'format_check',
+              name: 'Format Check',
+              steps: [{ run: 'pnpm format --list-different' }],
+            },
+          ],
+        }),
+        blockRootPackageJson({
+          devDependencies: pinned('oxfmt'),
+          scripts: { format: 'oxfmt' },
+        }),
+        blockVSCode({
+          extensions: ['oxc.oxc-vscode'],
+          settings: { 'editor.defaultFormatter': 'oxc.oxc-vscode' },
+        }),
+      ],
+      files: {
+        'oxfmt.config.ts': `import { defineConfig, type OxfmtConfig } from 'oxfmt';
+
+const config: OxfmtConfig = defineConfig(${printStatic(sorted, readConfigLayout(props.existing))});
+
+export default config;
+`,
+      },
+    };
+  },
+  setup() {
+    return { scripts: [{ commands: ['pnpm format'], phase: 1 }] };
+  },
+  transition() {
+    return { scripts: [{ commands: ['pnpm format'], phase: 1 }] };
+  },
+});
