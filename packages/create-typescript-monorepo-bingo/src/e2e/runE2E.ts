@@ -112,9 +112,9 @@ const scenarios: Scenario[] = [
         cli: [
           '--mode',
           'transition',
-          '--new-package',
+          '--newPackage',
           'second',
-          '--new-package-description',
+          '--newPackageDescription',
           'A second package.',
         ],
       },
@@ -154,7 +154,12 @@ const results: { failures: string[]; name: string }[] = [];
 
 for (const scenario of selected) {
   console.log(`\n▶ ${scenario.name}`);
-  results.push({ failures: await runScenario(scenario), name: scenario.name });
+  try {
+    results.push({ failures: await runScenario(scenario), name: scenario.name });
+  } catch (error) {
+    console.log(`  ✗ ${String(error)}`);
+    results.push({ failures: [String(error)], name: scenario.name });
+  }
 }
 
 console.log('\nResults:');
@@ -174,7 +179,12 @@ if (results.some(({ failures }) => failures.length)) {
 async function runScenario(scenario: Scenario): Promise<string[]> {
   const directory = path.join(workspace, scenario.name);
   const failures: string[] = [];
-  await fs.mkdir(directory, { recursive: true });
+
+  // The CLI's setup mode creates the directory itself, and refuses existing ones.
+  const [firstStep] = scenario.steps;
+  if (!firstStep || !('cli' in firstStep)) {
+    await fs.mkdir(directory, { recursive: true });
+  }
 
   if (scenario.source) {
     const { directory: sourceDirectory, ref } = scenario.source;

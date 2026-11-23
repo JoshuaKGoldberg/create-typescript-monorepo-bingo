@@ -43,12 +43,11 @@ export function getRepositoryUrl(options: RootOptions): string {
 }
 
 /**
- * Gets the author object for package.json files, if an author name is known.
+ * Gets the author object for package.json files, falling back to the repository owner,
+ * since eslint-plugin-package-json requires attribution.
  */
-export function getAuthor(options: RootOptions): undefined | { email?: string; name: string } {
-  return options.author
-    ? { name: options.author, ...(options.email && { email: options.email }) }
-    : undefined;
+export function getAuthor(options: RootOptions): { email?: string; name: string } {
+  return { name: options.author ?? options.owner, ...(options.email && { email: options.email }) };
 }
 
 /**

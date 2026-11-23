@@ -33,7 +33,7 @@ npx create-typescript-monorepo-bingo --mode transition
 Add a package to an existing monorepo, with zero hand edits to the root tsconfig, catalogs or other configs:
 
 ```shell
-npx create-typescript-monorepo-bingo --mode transition --new-package my-lib --new-package-description "My library."
+npx create-typescript-monorepo-bingo --mode transition --newPackage my-lib --newPackageDescription "My library."
 ```
 
 Transitions are designed to be re-run weekly: after the first one, a repository that hasn't drifted gets no changes.
@@ -56,7 +56,7 @@ Transitions are designed to be re-run weekly: after the first one, a repository 
 ### Task Runners
 
 No task runner is needed by default: tsdown, Vitest and `tsc -b` each run once across the workspace.
-Opt into one with `--task-runner pnpm`, `--task-runner turbo` or `--task-runner nx` to orchestrate per-package `build` and `test` scripts.
+Opt into one with `--taskRunner pnpm`, `--taskRunner turbo` or `--taskRunner nx` to orchestrate per-package `build` and `test` scripts.
 
 ### Catalogs
 
@@ -73,30 +73,30 @@ CTM writes catalog entries itself, so `catalogMode` stays `manual`.
 
 typescript-eslint, tsdown's declaration generator and `astro check` still need TypeScript's JavaScript API, which TypeScript 7.0 doesn't have.
 So `typescript` is aliased to [`@typescript/typescript6`](https://www.npmjs.com/package/@typescript/typescript6), which only ships a `tsc6` binary, and a `typescript7` alias provides `tsc`.
-Set `--typescript7-alias` to use a different name; an existing alias, such as flint's `@typescript/native`, is kept.
+Set `--typescript7Alias` to use a different name; an existing alias, such as flint's `@typescript/native`, is kept.
 
 ## Options
 
 Options are inferred from an existing repository's files, and prompted for in new ones.
 
-| Option                      | Description                                                                        | Default                                |
-| --------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------- |
-| `--owner`                   | GitHub organization or user the repository is under                                | (prompted)                             |
-| `--repository`              | Kebab-case name of the repository                                                  | (prompted)                             |
-| `--title`                   | Title Case title for the repository                                                | (prompted)                             |
-| `--description`             | Sentence-case description of the repository                                        | (prompted)                             |
-| `--author`, `--email`       | Author for `package.json` files                                                    | from the root manifest                 |
-| `--catalogs`                | `none`, `default` or `named`                                                       | `default` for new repos                |
-| `--new-package`             | Name of a package to add under `packages/`                                         |                                        |
-| `--new-package-description` | Description of the `--new-package`                                                 |                                        |
-| `--node`                    | Node.js version for `.nvmrc` and CI                                                | `26.13.1`                              |
-| `--node-engines`            | `engines.node` range                                                               | `^22.22.2 \|\| ^24.15.0 \|\| >=26.0.0` |
-| `--pnpm`                    | pnpm version for `packageManager`                                                  | `12.21.0`                              |
-| `--release-app`             | Prefix of the release GitHub App's `_CLIENT_ID` variable and `_PRIVATE_KEY` secret | `RELEASEBOT_APP`                       |
-| `--scope`                   | npm scope of the private build package                                             | `@<repository>`                        |
-| `--task-runner`             | `none`, `pnpm`, `turbo` or `nx`                                                    | `none`                                 |
-| `--typescript7-alias`       | Dependency name aliasing TypeScript 7                                              | `typescript7`                          |
-| `--workflow-extension`      | `yaml` or `yml`, for GitHub Actions files                                          | `yaml`                                 |
+| Option                    | Description                                                                        | Default                                |
+| ------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------- |
+| `--owner`                 | GitHub organization or user the repository is under                                | (prompted)                             |
+| `--repository`            | Kebab-case name of the repository                                                  | (prompted)                             |
+| `--title`                 | Title Case title for the repository                                                | (prompted)                             |
+| `--description`           | Sentence-case description of the repository                                        | (prompted)                             |
+| `--author`, `--email`     | Author for `package.json` files                                                    | from the root manifest                 |
+| `--catalogs`              | `none`, `default` or `named`                                                       | `default` for new repos                |
+| `--newPackage`            | Name of a package to add under `packages/`                                         |                                        |
+| `--newPackageDescription` | Description of the `--newPackage`                                                  |                                        |
+| `--node`                  | Node.js version for `.nvmrc` and CI                                                | `26.13.1`                              |
+| `--nodeEngines`           | `engines.node` range                                                               | `^22.22.2 \|\| ^24.15.0 \|\| >=26.0.0` |
+| `--pnpm`                  | pnpm version for `packageManager`                                                  | `12.21.0`                              |
+| `--releaseApp`            | Prefix of the release GitHub App's `_CLIENT_ID` variable and `_PRIVATE_KEY` secret | `RELEASEBOT_APP`                       |
+| `--scope`                 | npm scope of the private build package                                             | `@<repository>`                        |
+| `--taskRunner`            | `none`, `pnpm`, `turbo` or `nx`                                                    | `none`                                 |
+| `--typescript7Alias`      | Dependency name aliasing TypeScript 7                                              | `typescript7`                          |
+| `--workflowExtension`     | `yaml` or `yml`, for GitHub Actions files                                          | `yaml`                                 |
 
 ## How It Works
 
