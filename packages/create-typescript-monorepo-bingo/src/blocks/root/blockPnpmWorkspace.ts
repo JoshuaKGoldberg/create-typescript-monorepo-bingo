@@ -42,6 +42,11 @@ export const blockPnpmWorkspace = rootBase.createBlock({
     // Maps that were sorted (or are new) stay sorted; hand-ordered ones keep their order.
     const unsortedMaps = new WeakSet();
     collectUnsortedMaps(document.contents, unsortedMaps);
+    // An existing file may lead with packages, as pnpm's docs write it, then sort the rest.
+    const leadsWithPackages =
+      props.existing !== undefined &&
+      isMap(document.contents) &&
+      keyText(document.contents.items[0]?.key) === 'packages';
     const originalKeys = new Set(
       isMap(document.contents) ? document.contents.items.map((pair) => keyText(pair.key)) : [],
     );
@@ -55,7 +60,13 @@ export const blockPnpmWorkspace = rootBase.createBlock({
         (directory) => !existingGlobs.some((glob) => globCovers(glob, directory)),
       ),
     ]);
-    if (globs.length !== existingGlobs.length) {
+    // New globs are appended to an existing list, keeping its comments and quoting.
+    const packagesNode = document.get('packages');
+    if (isSeq(packagesNode)) {
+      for (const glob of globs.slice(existingGlobs.length)) {
+        packagesNode.items.push(document.createNode(glob));
+      }
+    } else if (globs.length !== existingGlobs.length) {
       document.set('packages', document.createNode(globs));
     }
 
@@ -83,7 +94,7 @@ export const blockPnpmWorkspace = rootBase.createBlock({
       );
     }
 
-    sortMaps(document.contents, unsortedMaps);
+    sortMaps(document.contents, unsortedMaps, leadsWithPackages);
     spaceTopLevel(document, originalKeys);
 
     // A file whose content doesn't change is written back exactly as it was.
@@ -210,7 +221,10 @@ function setDeep(document: Document, path: string[], value: unknown) {
 
 function collectUnsortedMaps(node: unknown, unsorted: WeakSet<object>) {
   if (isMap(node)) {
-    const keys = node.items.map((pair) => keyText(pair.key));
+    // A leading packages key, as pnpm's docs write it, doesn't count when checking order.
+    const keys = node.items
+      .map((pair) => keyText(pair.key))
+      .filter((key, index) => index > 0 || key !== 'packages');
     if (keys.some((key, index) => index > 0 && compareKeys(keys[index - 1] ?? '', key) > 0)) {
       unsorted.add(node);
     }
@@ -224,10 +238,13 @@ function collectUnsortedMaps(node: unknown, unsorted: WeakSet<object>) {
   }
 }
 
-function sortMaps(node: unknown, unsorted: WeakSet<object>) {
+function sortMaps(node: unknown, unsorted: WeakSet<object>, leadsWithPackages = false) {
   if (isMap(node)) {
     if (!unsorted.has(node)) {
-      node.items.sort((a, b) => compareKeys(keyText(a.key), keyText(b.key)));
+      const leading = leadsWithPackages ? node.items.slice(0, 1) : [];
+      const sortable = node.items.slice(leading.length);
+      sortable.sort((a, b) => compareKeys(keyText(a.key), keyText(b.key)));
+      node.items = [...leading, ...sortable];
     }
     for (const pair of node.items) {
       sortMaps(pair.value, unsorted);

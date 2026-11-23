@@ -19,6 +19,7 @@ export const packageSpecSchema = z.object({
   kind: z.enum(packageKinds),
   name: z.string(),
   scripts: z.array(z.string()).optional(),
+  tsdownWorkspaceReady: z.boolean().optional(),
   workspaceDependencies: z.array(z.string()).optional(),
 });
 

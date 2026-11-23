@@ -135,6 +135,10 @@ export const blockBuildPackage = rootBase.createBlock({
     const existingTSConfigBase = parseJsonText(existingTexts.tsconfigBase);
     const name = getBuildPackageName(options);
     const ownsBase = isOwnedFile(existingTexts.tsdownBase);
+    const unready = (options.packages ?? []).filter(
+      (pkg) => pkg.kind === 'library' && pkg.tsdownWorkspaceReady === false,
+    );
+    const workspaceReady = !unready.length;
     const { catalogEntries, dependencies } = resolveDependencies(
       options,
       'dependencies',
@@ -173,9 +177,14 @@ export const blockBuildPackage = rootBase.createBlock({
     const typescript7Alias = getTypeScript7Alias(options);
 
     return {
-      suggestions: isOwnedFile(existingTexts.tsdownBase)
-        ? []
-        : [describeUnownedFile('packages/build/src/tsdown/base.ts')],
+      suggestions: [
+        ...(ownsBase ? [] : [describeUnownedFile('packages/build/src/tsdown/base.ts')]),
+        ...(workspaceReady
+          ? []
+          : [
+              `tsdown's workspace mode skips package configs without an entry, so a root tsdown build wasn't added. Spread the build package's base, or add an entry, in: ${unready.map((pkg) => pkg.directory).join(', ')}.`,
+            ]),
+      ],
       extensions: [
         blockGitHubActionsCI({
           jobs: [
@@ -206,7 +215,7 @@ export const blockBuildPackage = rootBase.createBlock({
             [typescript7Alias]: typescript7Specifier(),
           },
           scripts: {
-            ...(!usesTaskRunner(options) && { build: 'tsdown' }),
+            ...(!usesTaskRunner(options) && workspaceReady && { build: 'tsdown' }),
             typecheck: 'tsc -b',
           },
         }),
@@ -261,7 +270,8 @@ export const blockBuildPackage = rootBase.createBlock({
           },
         },
         // An existing root config is the repository's, like each package's own.
-        ...(existingTexts.rootTsdown === undefined && { 'tsdown.config.ts': rootTsdownConfig }),
+        ...(existingTexts.rootTsdown === undefined &&
+          workspaceReady && { 'tsdown.config.ts': rootTsdownConfig }),
       },
     };
   },

@@ -720,4 +720,82 @@ export default config;
     expect(keys.indexOf('repository')).toBeLessThan(keys.indexOf('license'));
     expect(Object.keys(output.scripts)).toEqual(Object.keys(output.scripts).sort());
   });
+
+  it('keeps comments in the workspace packages list when adding a glob', () => {
+    const files = createRepository();
+    setFile(
+      files,
+      'pnpm-workspace.yaml',
+      "packages:\n  # the example package\n  - 'packages/example' # inline\n  - 'packages/build'\n",
+    );
+
+    const output =
+      getFile(transition(files, { newPackage: 'second' }).files, 'pnpm-workspace.yaml') ?? '';
+
+    expect(output).toContain('# the example package');
+    expect(output).toContain("- 'packages/example' # inline");
+    expect(output).toContain('packages/second');
+  });
+
+  it('infers pnpm as the task runner from common recursive spellings', () => {
+    for (const build of ['pnpm run -r build', 'pnpm -F "./packages/*" build']) {
+      const files = createRepository();
+      const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+        scripts: Record<string, string>;
+      };
+      manifest.scripts.build = build;
+      setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+      expect(
+        prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).taskRunner,
+      ).toBe('pnpm');
+    }
+  });
+
+  it("doesn't add Vitest to a repository that tests with something else", () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['vitest.config.ts'];
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.test = 'node --test';
+    delete manifest.devDependencies.vitest;
+    delete manifest.devDependencies['@vitest/coverage-v8'];
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    const output = transition(files).files;
+
+    expect(getFile(output, 'vitest.config.ts')).toBeUndefined();
+    expect(getFile(output, 'package.json')).not.toContain('"vitest"');
+  });
+
+  it("doesn't add a root tsdown build when a package config would be skipped by it", () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['tsdown.config.ts'];
+    setFile(
+      files,
+      'packages/example/tsdown.config.ts',
+      'export default defineConfig({ dts: true });\n',
+    );
+
+    const creation = transition(files);
+
+    expect(getFile(creation.files, 'tsdown.config.ts')).toBeUndefined();
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('packages/example'));
+  });
+
+  it('judges .gitignore coverage the same whether or not outputs are built', () => {
+    const clean = createRepository();
+    setFile(clean, '.gitignore', 'node_modules\npackages/*/dist\npackages/*/lib\ncoverage\n');
+    const built = createRepository();
+    setFile(built, '.gitignore', 'node_modules\npackages/*/dist\npackages/*/lib\ncoverage\n');
+    setFile(built, 'packages/example/dist/index.mjs', '');
+    setFile(built, 'packages/example/lib/index.d.ts', '');
+
+    const cleanOutput = getFile(transition(clean).files, '.gitignore');
+
+    expect(cleanOutput).toBe('node_modules\npackages/*/dist\npackages/*/lib\ncoverage\n');
+    expect(getFile(transition(built).files, '.gitignore')).toBe(cleanOutput);
+  });
 });

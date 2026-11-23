@@ -129,7 +129,8 @@ export const blockNx = rootBase.createBlock({
 
     return {
       extensions: [
-        blockGitignore({ ignores: ['.nx/'] }),
+        // Nx's own recommendation: other .nx folders, like version plans, are tracked.
+        blockGitignore({ ignores: ['.nx/cache/', '.nx/workspace-data/'] }),
         blockPnpmWorkspace({
           settings: { permissions: { nx: { build: false } } },
         }),

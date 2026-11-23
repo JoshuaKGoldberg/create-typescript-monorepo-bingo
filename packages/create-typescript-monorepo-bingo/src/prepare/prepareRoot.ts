@@ -208,6 +208,10 @@ function createPackageSpec(pkg: WorkspacePackage, all: WorkspacePackage[]): Pack
     ...(pkg.manifest.description && { description: pkg.manifest.description }),
     directory: pkg.directory,
     ...(tsconfig?.compilerOptions?.isolatedDeclarations && { isolatedDeclarations: true }),
+    // tsdown's workspace mode skips package configs without an entry of their own.
+    ...(!isTsdownWorkspaceReady(readText(pkg.files, 'tsdown.config.ts')) && {
+      tsdownWorkspaceReady: false,
+    }),
     kind: inferPackageKind(pkg),
     name: pkg.manifest.name ?? pkg.directory.split('/').pop() ?? pkg.directory,
     ...(pkg.manifest.scripts && { scripts: Object.keys(pkg.manifest.scripts) }),
@@ -415,8 +419,13 @@ function inferTaskRunner(
   }
 
   // A root that builds by running each package's script is using pnpm as its task runner.
-  const build = manifest?.scripts?.build ?? '';
-  return workspace?.tasks || /^pnpm (?:-r|--recursive|--filter)\b/.test(build) ? 'pnpm' : 'none';
+  const recursive = /\bpnpm (?:run )?(?:-r|--recursive|-F|--filter)\b/;
+  return workspace?.tasks ||
+    [manifest?.scripts?.build, manifest?.scripts?.test].some((script) =>
+      recursive.test(script ?? ''),
+    )
+    ? 'pnpm'
+    : 'none';
 }
 
 function inferTitle(files: IntakeDirectory): Partial<RootOptions> {
@@ -566,4 +575,8 @@ function inferDescription(
       .find((line) => line && !/^(?:[#<>[|`*+-]|\d+\.)/.test(line));
 
   return tagline ? { description: tagline.trim() } : {};
+}
+
+function isTsdownWorkspaceReady(config: string | undefined) {
+  return config === undefined || /\bentry\b|\.\.\.\s*base\b/.test(config);
 }

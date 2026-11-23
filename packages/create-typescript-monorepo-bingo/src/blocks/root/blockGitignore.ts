@@ -21,7 +21,6 @@ export const blockGitignore = rootBase.createBlock({
     return {
       // Directory names, and packages/*/<name> patterns, that already hold files.
       directories: [...collectDirectoryNames(files)],
-      packageDirectories: [...collectPackageDirectories(files)],
       ...(existing !== undefined && { existing }),
     };
   },
@@ -29,7 +28,6 @@ export const blockGitignore = rootBase.createBlock({
     directories: z.array(z.string()).optional(),
     existing: z.string().optional(),
     ignores: z.array(z.string()).optional(),
-    packageDirectories: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
     const lines = (props.existing ?? '')
@@ -41,34 +39,50 @@ export const blockGitignore = rootBase.createBlock({
     const packageNames = new Set(
       (options.packages ?? []).map((pkg) => pkg.directory.split('/').pop() ?? pkg.directory),
     );
-    const directories = new Set(props.directories);
-    const packageDirectories = new Set(props.packageDirectories);
+    // Only directories the repository doesn't already ignore, like build outputs, count.
+    const existingMatcher = ignoreMatcher().add(lines.join('\n'));
+    const trackedDirectories = (props.directories ?? []).filter(
+      (path) => !existingMatcher.ignores(`${path}/`),
+    );
+    const directories = new Set(trackedDirectories.map((path) => path.split('/').pop() ?? path));
+    const packageDirectories = new Set(
+      trackedDirectories
+        .map((path) => path.split('/'))
+        .filter((segments) => segments.length === 3)
+        .map(([parent = '', , name = '']) => `${parent}/*/${name}`),
+    );
     const skipped: string[] = [];
 
     for (const ignore of ['node_modules/', ...(props.ignores ?? [])]) {
       const name = normalizeIgnore(ignore);
       const matcher = ignoreMatcher().add(lines.join('\n'));
 
-      // Covered if build outputs at the root and in packages are already ignored,
-      // by whatever patterns the repository uses.
-      const samples = [
-        `${name}/file`,
-        ...parents.map((parent) => `${parent}/package/${name}/file`),
-      ];
+      // Package build outputs, like dist and lib, are judged by package paths only; tool
+      // folders, like coverage and .nx, only exist at the root.
+      const isPackageOutput = name === 'dist' || name === 'lib';
+      const samples = isPackageOutput
+        ? parents.map((parent) => `${parent}/package/${name}/file`)
+        : [`${name}/file`];
       if (samples.every((sample) => matcher.ignores(sample))) {
         continue;
       }
 
       // A bare name would also hide a package with that name, or source folders like
-      // src/lib, so those get precise per-package globs instead.
+      // src/lib, so those get precise globs instead.
       if (name !== 'node_modules' && (directories.has(name) || packageNames.has(name))) {
-        const precise = parents.map((parent) => `${parent}/*/${name}/`);
-        if (precise.some((glob) => packageDirectories.has(glob.slice(0, -1)))) {
+        const precise = isPackageOutput
+          ? parents.map((parent) => `${parent}/*/${name}/`)
+          : [`/${name}/`];
+        if (precise.some((glob) => packageDirectories.has(glob.replace(/\/$/, '')))) {
           skipped.push(ignore);
           continue;
         }
 
-        lines.push(...precise.filter((glob) => !matcher.ignores(glob.replace('*', 'package'))));
+        lines.push(
+          ...precise.filter(
+            (glob) => !matcher.ignores(glob.replace(/^\//, '').replace('*', 'package')),
+          ),
+        );
         continue;
       }
 
@@ -100,44 +114,21 @@ function normalizeIgnore(pattern: string) {
   return pattern.replace(/^\*\*\//, '').replace(/\/$/, '');
 }
 
+/**
+ * Collects the paths of directories that hold files.
+ */
 function collectDirectoryNames(
   directory: IntakeDirectory | undefined,
-  names = new Set<string>(),
+  paths = new Set<string>(),
+  prefix = '',
 ): Set<string> {
   for (const [name, entry] of Object.entries(directory ?? {})) {
     if (entry && !Array.isArray(entry) && name !== 'node_modules' && name !== '.git') {
       if (Object.keys(entry).length) {
-        names.add(name);
+        paths.add(`${prefix}${name}`);
       }
-      collectDirectoryNames(entry, names);
+      collectDirectoryNames(entry, paths, `${prefix}${name}/`);
     }
   }
-  return names;
-}
-
-function collectPackageDirectories(files: IntakeDirectory | undefined): Set<string> {
-  const patterns = new Set<string>();
-  for (const [parent, parentEntry] of Object.entries(files ?? {})) {
-    if (!parentEntry || Array.isArray(parentEntry) || parent === 'node_modules') {
-      continue;
-    }
-
-    for (const packageEntry of Object.values(parentEntry)) {
-      if (!packageEntry || Array.isArray(packageEntry)) {
-        continue;
-      }
-
-      for (const [name, entry] of Object.entries(packageEntry)) {
-        if (
-          entry &&
-          !Array.isArray(entry) &&
-          Object.keys(entry).length &&
-          name !== 'node_modules'
-        ) {
-          patterns.add(`${parent}/*/${name}`);
-        }
-      }
-    }
-  }
-  return patterns;
+  return paths;
 }

@@ -8,6 +8,8 @@ import { defaultExclude, defineConfig } from 'vitest/config';
 // Untyped, so this works with every Vitest version that has projects.
 const config = defineConfig({
   test: {
+    // Packages without tests yet, like a new one, don't fail the run.
+    passWithNoTests: true,
     coverage: {
       exclude: [...defaultExclude, '**/config.ts'],
       include: ['packages/*/src/**/*.ts'],

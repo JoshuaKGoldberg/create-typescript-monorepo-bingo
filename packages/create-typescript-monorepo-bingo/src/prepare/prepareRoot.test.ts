@@ -32,7 +32,7 @@ const files: IntakeDirectory = {
     a: {
       'package.json': json({ name: 'a', peerDependencies: { zod: '^4.4.3' } }),
       'tsconfig.json': json({ compilerOptions: { isolatedDeclarations: true } }),
-      'tsdown.config.ts': [''],
+      'tsdown.config.ts': ['export default defineConfig({ ...base });'],
     },
     b: {
       'package.json': json({
@@ -42,7 +42,7 @@ const files: IntakeDirectory = {
         scripts: { test: 'vitest' },
       }),
       'tsconfig.json': json({}),
-      'tsdown.config.ts': [''],
+      'tsdown.config.ts': ['export default defineConfig({ ...base });'],
     },
     build: {
       'package.json': json({ dependencies: { tsdown: '^0.23.7' }, name: '@my/build' }),

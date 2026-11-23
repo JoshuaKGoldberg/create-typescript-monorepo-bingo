@@ -96,8 +96,8 @@ export function usesTaskRunner(options: RootOptions): boolean {
  */
 export function getPackageParents(options: RootOptions): string[] {
   const parents = new Set(
+    // Every package's parent, including the build package's, since tsc -b emits there too.
     (options.packages ?? [])
-      .filter((pkg) => pkg.kind !== 'build')
       .map((pkg) => pkg.directory.split('/').slice(0, -1).join('/'))
       .filter(Boolean),
   );

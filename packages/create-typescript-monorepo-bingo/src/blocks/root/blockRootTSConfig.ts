@@ -42,7 +42,13 @@ export const blockRootTSConfig = rootBase.createBlock({
     for (const reference of props.references ?? []) {
       if (!normalized.has(normalizePath(reference))) {
         normalized.add(normalizePath(reference));
-        references.push(`./${normalizePath(reference)}`);
+        // A sorted list stays sorted.
+        const path = `./${normalizePath(reference)}`;
+        const sorted =
+          references.length > 1 &&
+          references.every((item, index) => index === 0 || (references[index - 1] ?? '') <= item);
+        const index = sorted ? references.findIndex((item) => item > path) : -1;
+        references.splice(index === -1 ? references.length : index, 0, path);
       }
     }
 

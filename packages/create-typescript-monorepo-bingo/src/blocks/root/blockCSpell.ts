@@ -92,7 +92,12 @@ export const blockCSpell = rootBase.createBlock({
                   ...getPackageGlobs(options, 'lib'),
                   ...(props.ignorePaths ?? []),
                 ]),
-                words: mergeList(list('words'), props.words ?? [], compareCaseInsensitive),
+                // The words CTM adds come from its workflows, which an ignored .github skips.
+                words: mergeList(
+                  list('words'),
+                  list('ignorePaths')?.includes('.github') ? [] : (props.words ?? []),
+                  compareCaseInsensitive,
+                ),
               },
               props.existing,
             ),
