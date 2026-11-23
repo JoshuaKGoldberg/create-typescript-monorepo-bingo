@@ -1,4 +1,4 @@
-// cspell:ignore quandrix widgetco zentrix zorbix
+// cspell:ignore postbuild quandrix widgetco zentrix zorbix
 import type { CreatedDirectory, IntakeDirectory } from 'bingo-fs';
 import { describe, expect, it, vi } from 'vitest';
 import { parse as parseYaml } from 'yaml';
@@ -1271,6 +1271,206 @@ describe('round 11 regressions', () => {
     expect(
       prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).recursiveBuild,
     ).toBe(expected);
+  });
+});
+
+describe('round 17 regressions', () => {
+  const workflowPath = '.github/workflows/transitions.yaml';
+  const editJson = (
+    files: IntakeDirectory,
+    path: string,
+    edit: (json: Record<string, unknown>) => void,
+  ) => {
+    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
+    edit(json);
+    setFile(files, path, JSON.stringify(json, null, 2));
+  };
+
+  it('remembers nothing for a repository with the defaults', () => {
+    expect(getFile(createRepository(), workflowPath)).toContain(
+      '--mode transition --offline --skip-requests',
+    );
+  });
+
+  it.each([
+    { linter: 'none' },
+    { formatter: 'none' },
+    { formatter: 'prettier' },
+    { testRunner: 'other' },
+  ] as const)('remembers %o from setup on later transitions', (options) => {
+    const files = createRepository(options);
+
+    expect(getFile(files, workflowPath)).toContain(Object.entries(options).flat().join(' '));
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+    applyFiles(files, transition(files, { newPackage: 'second' }).files);
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it('leaves ESLint out with --linter none', () => {
+    const files = createRepository({ linter: 'none' });
+
+    expect(getFile(files, 'eslint.config.ts')).toBeUndefined();
+    expect(getFile(files, 'package.json')).not.toContain('eslint');
+    expect(getFile(files, '.github/workflows/ci.yaml')).not.toContain('pnpm lint\n');
+    expect(getFile(files, '.github/DEVELOPMENT.md')).not.toContain('eslint.org');
+    expect(getFile(files, '.vscode/settings.json')).not.toContain('eslint');
+  });
+
+  it('opts an existing repository out of ESLint, keeps it out, and opts back in', () => {
+    const files = createRepository();
+    const config = getFile(files, 'eslint.config.ts');
+    const creation = transition(files, { linter: 'none' });
+    applyFiles(files, creation.files);
+
+    expect(getFile(files, 'eslint.config.ts')).toBe(config);
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('ESLint is turned off'));
+
+    delete (files as Record<string, unknown>)['eslint.config.ts'];
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+
+    applyFiles(files, transition(files, { linter: 'eslint' }).files);
+    expect(getFile(files, 'eslint.config.ts')).toBeDefined();
+    expect(getFile(files, workflowPath)).toContain('--linter eslint');
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it("only changes the flag in a repository's own transitions workflow", () => {
+    const files = createRepository();
+    const workflow = (getFile(files, workflowPath) ?? '').replace(
+      '--skip-requests',
+      '--skip-requests && echo done # ours',
+    );
+    setFile(files, workflowPath, workflow);
+    applyFiles(files, transition(files, { linter: 'none' }).files);
+
+    expect(getFile(files, workflowPath)).toBe(
+      workflow.replace('--mode transition', '--mode transition --linter none'),
+    );
+  });
+
+  it("suggests flags when it can't find its command", () => {
+    const files = createRepository();
+    setFile(files, workflowPath, 'name: Ours\non: push\njobs:\n  transition:\n    steps: []\n');
+
+    expect(transition(files, { linter: 'none' }).suggestions).toContainEqual(
+      expect.stringContaining('--linter none'),
+    );
+  });
+
+  it.each([
+    [{ build: 'tsdown' }],
+    [{}],
+    [{ prebuild: 'a', build: 'tsdown', test: 'vitest' }],
+    [{ build: 'tsdown', postbuild: 'b', test: 'vitest' }],
+  ])('keeps scripts %o in lint order across transitions', (scripts) => {
+    const files = createRepository();
+    editJson(files, 'package.json', (manifest) => {
+      manifest.scripts = scripts;
+    });
+    applyFiles(files, transition(files).files);
+
+    expect(getFile(files, 'eslint.config.ts')).not.toContain('sort-collections');
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it('keeps the lifecycle order of package scripts', () => {
+    const files = createRepository({ taskRunner: 'turbo' });
+    editJson(files, 'packages/example/package.json', (manifest) => {
+      manifest.scripts = { prebuild: 'a', build: 'tsdown', postbuild: 'b' };
+      delete manifest.engines;
+    });
+    applyFiles(files, transition(files).files);
+    const manifest = JSON.parse(getFile(files, 'packages/example/package.json') ?? '{}') as {
+      scripts: object;
+    };
+
+    expect(Object.keys(manifest.scripts)).toEqual(['prebuild', 'build', 'postbuild', 'test']);
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it('keeps Vitest lint rules where packages test with Vitest without a root config', () => {
+    const files = createRepository({ taskRunner: 'turbo' });
+    delete (files as Record<string, unknown>)['vitest.config.ts'];
+    editJson(files, 'package.json', (manifest) => {
+      delete (manifest.devDependencies as Record<string, string>).vitest;
+    });
+    editJson(files, 'packages/example/package.json', (manifest) => {
+      manifest.scripts = { build: 'tsdown', test: 'vitest run' };
+      (manifest.devDependencies as Record<string, string>).vitest = '^5.0.0';
+    });
+    applyFiles(files, transition(files).files);
+
+    expect(getFile(files, 'eslint.config.ts')).toContain('vitest.configs.recommended');
+    expect(getFile(files, 'package.json')).toContain('@vitest/eslint-plugin');
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it('lets Prettier win over Biome, unless told otherwise', () => {
+    const files = createRepository({ formatter: 'prettier' });
+    setFile(
+      files,
+      workflowPath,
+      (getFile(files, workflowPath) ?? '').replace(' --formatter prettier', ''),
+    );
+    setFile(files, 'biome.json', '{}');
+    editJson(files, 'package.json', (manifest) => {
+      (manifest.devDependencies as Record<string, string>)['@biomejs/biome'] = '^2.0.0';
+      (manifest.scripts as Record<string, string>)['lint:biome'] =
+        'biome check --formatter-enabled=false .';
+    });
+    const infer = () =>
+      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).formatter;
+
+    expect(infer()).toBe('prettier');
+    applyFiles(files, transition(files, { formatter: 'biome' }).files);
+    expect(infer()).toBe('biome');
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it("doesn't describe or turn on formatting without a formatter", () => {
+    const files = createRepository({ formatter: 'none' });
+
+    expect(getFile(files, '.github/DEVELOPMENT.md')).not.toContain('## Formatting');
+    expect(getFile(files, '.vscode/settings.json')).not.toContain('formatOnSave');
+  });
+
+  it('remembers pnpm as the task runner next to a test script', () => {
+    const files = createRepository();
+    applyFiles(files, transition(files, { taskRunner: 'pnpm' }).files);
+
+    expect(
+      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).taskRunner,
+    ).toBe('pnpm');
+  });
+
+  it('keeps TypeScript where tsconfigs use options TypeScript 7 removed', () => {
+    const files = createRepository();
+    editJson(files, 'package.json', (manifest) => {
+      const devDependencies = manifest.devDependencies as Record<string, string>;
+      devDependencies.typescript = '^6.0.2';
+      delete devDependencies.typescript7;
+    });
+    editJson(files, 'packages/example/tsconfig.json', (tsconfig) => {
+      tsconfig.compilerOptions = { baseUrl: '.', ignoreDeprecations: '6.0' };
+    });
+    const creation = transition(files);
+    applyFiles(files, creation.files);
+
+    expect(getFile(files, 'package.json')).toContain('"typescript": "^6.0.2"');
+    expect(getFile(files, 'package.json')).not.toContain('typescript7');
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('ignoreDeprecations'));
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it("doesn't un-ignore a build package that isn't created", () => {
+    const files: IntakeDirectory = {
+      '.gitignore': ['node_modules\nbuild\n'],
+      'package.json': ['{ "name": "root", "private": true }'],
+      'pnpm-workspace.yaml': ["packages:\n  - 'apps/*'\n"],
+      apps: { web: { 'package.json': ['{ "name": "web", "private": true }'] } },
+    };
+
+    expect(getFile(transition(files).files, '.gitignore')).not.toContain('!packages/build/');
   });
 });
 

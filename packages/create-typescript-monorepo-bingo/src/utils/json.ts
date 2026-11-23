@@ -138,18 +138,25 @@ export function sortKeys<T>(value: Record<string, T>): Record<string, T> {
 }
 
 /**
- * Sorts merged keys when the existing object's keys were already sorted, as lint rules
- * like package-json/sort-collections expect; otherwise keeps the merged order.
+ * Merges scripts in the order package-json/sort-collections expects, if the existing ones
+ * already are; otherwise existing scripts keep their order, with new ones after them.
  */
-export function keepSorted<T>(
-  existing: Record<string, unknown> | undefined,
-  merged: Record<string, T>,
-): Record<string, T> {
-  const keys = Object.keys(existing ?? {});
-  const sorted =
-    keys.length > 1 &&
-    keys.every((key, index) => index === 0 || (keys[index - 1] ?? '').localeCompare(key) <= 0);
-  return sorted ? sortKeys(merged) : merged;
+export function mergeScripts(
+  existing: Record<string, string> | undefined,
+  ours: Record<string, string>,
+): Record<string, string> {
+  const merged = { ...existing, ...omitKeys(ours, Object.keys(existing ?? {})) } as Record<
+    string,
+    string
+  >;
+  return hasSameKeyOrder(existing ?? {}, sortScripts(existing ?? {}))
+    ? sortScripts(merged)
+    : merged;
+}
+
+function sortScripts(scripts: Record<string, string>): Record<string, string> {
+  // On their own, since sort-package-json leaves scripts alone next to some dependencies.
+  return sortPackageJson({ scripts }).scripts;
 }
 
 /**

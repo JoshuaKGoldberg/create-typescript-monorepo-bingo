@@ -35,7 +35,7 @@ export const blockVSCode = rootBase.createBlock({
     launch: z.record(z.string(), z.unknown()).optional(),
     settings: z.record(z.string(), z.unknown()).optional(),
   },
-  produce({ props }) {
+  produce({ options, props }) {
     const texts = props.existing ?? {};
     const existingExtensions = parseJsonText(texts.extensions).recommendations as
       | string[]
@@ -44,7 +44,12 @@ export const blockVSCode = rootBase.createBlock({
     const existingSettings = parseJsonText(texts.settings);
     // A new file's settings are sorted; an existing one keeps its keys in place,
     // with any it's missing appended.
-    const ours = { 'editor.formatOnSave': true, 'editor.rulers': [100], ...props.settings };
+    const ours = {
+      // Without a formatter, VS Code's built-in one would restyle files.
+      ...(options.formatter !== 'none' && { 'editor.formatOnSave': true }),
+      'editor.rulers': [100],
+      ...props.settings,
+    };
     const settings = {
       ...(texts.settings === undefined ? sortKeys(ours) : withDefaults(existingSettings, ours)),
       ...updateStockTsdk(existingSettings, props.settings?.['js/ts.tsdk.path']),

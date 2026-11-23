@@ -79,6 +79,7 @@ Set `--typescript7Alias` to use a different name; an existing alias, such as fli
 ## Options
 
 Options are inferred from an existing repository's files, and prompted for in new ones.
+`--formatter`, `--linter` and `--testRunner` values that differ from what would be inferred are kept in the transitions workflow's command, for later transitions to use.
 
 | Option                    | Description                                                                        | Default                                |
 | ------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------- |
@@ -91,6 +92,7 @@ Options are inferred from an existing repository's files, and prompted for in ne
 | `--catalogShared`         | Dependencies to put in the default catalog                                         | inferred                               |
 | `--catalogs`              | `none`, `default` or `named`                                                       | `default` for new repos                |
 | `--formatter`             | `oxfmt`, `prettier`, `biome` (only where already used) or `none`                   | inferred, else `oxfmt`                 |
+| `--linter`                | `eslint`, or `none` to not set up ESLint                                           | `eslint`                               |
 | `--newPackage`            | Name of a package to add under `packages/`                                         |                                        |
 | `--newPackageDescription` | Description of the `--newPackage`                                                  |                                        |
 | `--node`                  | Node.js version for `.nvmrc` and CI                                                | `26.13.1`                              |
@@ -150,14 +152,16 @@ A transition adds what a repository is missing and leaves what it has:
 - New packages get `build` and `test` scripts; other per-package scripts a task runner runs, like `lint`, are left to add, since sibling packages' commands may not apply to a new one.
 - The weekly transitions workflow doesn't regenerate an `actions.lock` file; re-run `gh actions-lock` when a transition PR changes workflow pins.
 - `cspell.json` gets words for the owner, author, repository, scope, title and new package names CTM writes, but not for descriptions, which are your own prose: add any uncommon words in them.
+- A repository with both Prettier and Biome is taken to format with Prettier, unless told `--formatter biome`.
 - In Biome repositories, CTM formats the files it writes with `biome check --write` and adds no formatter of its own; its ESLint config leaves import and export sorting to Biome.
 - A root TypeScript older than 6 is kept, without the TypeScript 7 alias, whose `tsc` would replace it; a suggestion says to update. Updating TypeScript 6 can step back a patch version, to the newest `@typescript/typescript6`.
+- A root TypeScript is also kept where any tsconfig uses `ignoreDeprecations` for options TypeScript 7 removed. Otherwise, an existing repository's `tsc` becomes TypeScript 7's.
 - With ESLint older than 9, CTM doesn't set up its ESLint config; a suggestion says to update.
 - A root `tsconfig.json` that packages extend is left as it is, without a `tsc -b` typecheck, since packages would inherit what CTM adds to it.
 - Oxfmt can't load `oxfmt.config.ts` in a root with `"type": "commonjs"`; a suggestion says so.
 - Package tsconfigs that don't extend the build package's base are the repository's own: CTM leaves them alone, and existing packages without one don't get one.
 - In a repository without a formatter CTM knows (Oxfmt, Prettier or Biome), CTM adds none, so styling from dprint or ESLint isn't overwritten. Opt in with `--formatter oxfmt`, then run `pnpm format` once.
-- A repository without ESLint gets CTM's strict, type-aware rules, which existing code may not meet yet: a suggestion explains running `pnpm lint --fix` and recording the rest with `eslint --suppress-all`. CTM's lint job doesn't build first, so packages that export build output lint without each other's types until they're built.
+- A repository without ESLint gets CTM's strict, type-aware rules, which existing code may not meet yet: a suggestion explains running `pnpm lint --fix` and recording the rest with `eslint --suppress-all`. Opt out with `--linter none`. CTM's lint job doesn't build first, so packages that export build output lint without each other's types until they're built.
 - Existing tests without a root Vitest config are left alone, whatever runs them, as with `--testRunner other`. Opt in to CTM's Vitest setup with `--testRunner vitest`.
 - pnpm 12.0.0 or newer is needed.
 

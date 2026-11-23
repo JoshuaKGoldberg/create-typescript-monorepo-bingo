@@ -14,7 +14,7 @@ import {
   readText,
   withoutAlternate,
 } from '../../utils/files.ts';
-import { hasSameKeyOrder, hasSortedKeys } from '../../utils/json.ts';
+import { hasSameKeyOrder, hasSortedKeys, sortKeys } from '../../utils/json.ts';
 import { mergeList } from '../../utils/lists.ts';
 import { getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
@@ -63,7 +63,8 @@ export const blockESLint = rootBase.createBlock({
       eslintSpecifier,
       readText(files, 'pnpm-workspace.yaml'),
     );
-    const vitest = options.testRunner !== 'other';
+    const keepsVitest = keepsVitestLint(files, existing, options);
+    const vitest = options.testRunner !== 'other' || keepsVitest;
     const packageJsonRulesOff = findMissingPackageFields(files, options);
     const extras = readESLintExtras(
       existing,
@@ -90,6 +91,8 @@ export const blockESLint = rootBase.createBlock({
         !alternate &&
         !legacy &&
         Object.keys(files).length > 0 && { adopting: true }),
+      ...(existing !== undefined && isOwnedFile(existing) && { managed: true }),
+      ...(keepsVitest && { keepsVitest }),
       ...(packageJsonRulesOff.length && { packageJsonRulesOff }),
       ...(eslintMinimum && eslintMinimum.major < 9 && { oldESLint: eslintSpecifier }),
       ...(existingIgnores && { existingIgnores }),
@@ -104,6 +107,8 @@ export const blockESLint = rootBase.createBlock({
     alternate: z.string().optional(),
     legacy: z.string().optional(),
     adopting: z.boolean().optional(),
+    keepsVitest: z.boolean().optional(),
+    managed: z.boolean().optional(),
     oldESLint: z.string().optional(),
     packageJsonRulesOff: z.array(z.string()).optional(),
     unowned: z.boolean().optional(),
@@ -131,6 +136,18 @@ export const blockESLint = rootBase.createBlock({
     lintPrebuildSteps: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
+    if (options.linter === 'none') {
+      return props.managed
+        ? {
+            suggestions: [
+              'ESLint is turned off, so CTM no longer updates eslint.config.ts. To remove ESLint, delete it, along with the lint script, CI job, and the dependencies Knip then reports as unused.',
+            ],
+          }
+        : {};
+    }
+
+    const vitest = options.testRunner !== 'other' || !!props.keepsVitest;
+
     if (props.oldESLint) {
       return {
         suggestions: [
@@ -168,7 +185,7 @@ export const blockESLint = rootBase.createBlock({
       suggestions: [
         ...(props.adopting
           ? [
-              "CTM added ESLint with strict, type-aware rules, which existing code may not meet yet. Run `pnpm lint --fix`, then `pnpm exec eslint --suppress-all` to record what's left as ESLint bulk suppressions to fix over time. Files no tsconfig includes, like test files a tsconfig excludes, need one that includes them for typed linting.",
+              "CTM added ESLint with strict, type-aware rules, which existing code may not meet yet. Re-run with `--linter none` to go without it, after undoing these changes. Otherwise, run `pnpm lint --fix`, then `pnpm exec eslint --suppress-all` to record what's left as ESLint bulk suppressions to fix over time. Files no tsconfig includes, like test files a tsconfig excludes, need one that includes them for typed linting.",
             ]
           : []),
         ...(props.unparseable
@@ -198,7 +215,7 @@ export const blockESLint = rootBase.createBlock({
             '@eslint/js',
             '@eslint/markdown',
             // Vitest's rules would rewrite other test runners' imports, like node:test's.
-            ...(options.testRunner === 'other' ? [] : ['@vitest/eslint-plugin' as const]),
+            ...(vitest ? ['@vitest/eslint-plugin' as const] : []),
             'eslint',
             'eslint-plugin-jsdoc',
             'eslint-plugin-jsonc',
@@ -234,7 +251,7 @@ export const blockESLint = rootBase.createBlock({
             ignoresText,
             workflowExtension,
             props.extras,
-            options.testRunner !== 'other',
+            vitest,
             // Biome sorts imports and exports itself, in its own order.
             options.formatter !== 'biome',
             props.packageJsonRulesOff,
@@ -482,6 +499,28 @@ const requiredFields: [
 ];
 
 /**
+ * Whether CTM's Vitest lint rules stay where CTM otherwise leaves tests alone: packages
+ * still test with Vitest, only without a root config.
+ */
+function keepsVitestLint(
+  files: IntakeDirectory,
+  existing: string | undefined,
+  options: RootOptions,
+) {
+  const hasRootConfig =
+    readText(files, 'vitest.config.ts') !== undefined || options.vitestConfig !== undefined;
+  return (
+    !!existing?.includes('@vitest/eslint-plugin') &&
+    !hasRootConfig &&
+    ['.', ...(options.packages ?? []).map((pkg) => pkg.directory)].some((directory) => {
+      const path = directory === '.' ? 'package.json' : `${directory}/package.json`;
+      const { dependencies, devDependencies } = parseJsonText(readText(files, path), path);
+      return 'vitest' in { ...(dependencies as object), ...(devDependencies as object) };
+    })
+  );
+}
+
+/**
  * Collections package-json/sort-collections checks, apart from dependencies, which CTM sorts.
  */
 const sortedCollections = ['config', 'exports', 'overrides', 'peerDependenciesMeta', 'scripts'];
@@ -513,7 +552,12 @@ function findMissingPackageFields(files: IntakeDirectory, options: RootOptions):
     sortedCollections.some(
       (name) =>
         isPlainObject(manifest[name]) &&
-        !hasSameKeyOrder(manifest[name], sortPackageJson({ [name]: manifest[name] })[name]),
+        !hasSameKeyOrder(
+          manifest[name],
+          name === 'scripts'
+            ? (sortPackageJson({ scripts: manifest.scripts }).scripts as object)
+            : sortKeys(manifest[name]),
+        ),
     ),
   );
 

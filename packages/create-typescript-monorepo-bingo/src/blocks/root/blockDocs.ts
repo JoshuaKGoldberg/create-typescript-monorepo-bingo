@@ -190,7 +190,10 @@ ${
 pnpm build
 \`\`\`
 
-## Formatting
+${
+  options.formatter === 'none'
+    ? ''
+    : `## Formatting
 
 ${
   options.formatter === 'prettier'
@@ -207,15 +210,20 @@ To manually reformat all files, you can run:
 ${options.formatter === 'biome' ? 'pnpm exec biome check --write .' : 'pnpm format --write'}
 \`\`\`
 
-## Linting
+`
+}## Linting
 
-[ESLint](https://eslint.org) is used with [typescript-eslint](https://typescript-eslint.io) to lint JavaScript, TypeScript, JSON, YAML and Markdown files:
+${
+  options.linter === 'none'
+    ? 'Linters include'
+    : `[ESLint](https://eslint.org) is used with [typescript-eslint](https://typescript-eslint.io) to lint JavaScript, TypeScript, JSON, YAML and Markdown files:
 
 \`\`\`shell
 pnpm lint
 \`\`\`
 
-Other linters include [cspell](https://cspell.org) for spelling and [Knip](https://knip.dev) for unused files, dependencies and exports:
+Other linters include`
+} [cspell](https://cspell.org) for spelling and [Knip](https://knip.dev) for unused files, dependencies and exports:
 
 \`\`\`shell
 pnpm lint:spelling

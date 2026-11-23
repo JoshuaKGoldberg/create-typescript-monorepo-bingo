@@ -45,7 +45,7 @@ export function produceMonorepo(settings: ProduceMonorepoSettings): Partial<Crea
   // CTM sets up Oxfmt or Prettier, but only formats with an existing Biome setup.
   if (settings.mode === 'setup' && options.formatter === 'biome') {
     throw new Error(
-      "--formatter biome is for repositories that already format with Biome: new ones use 'oxfmt' or 'prettier'.",
+      "--formatter biome is for repositories that already format with Biome: new ones use 'oxfmt', 'prettier' or 'none'.",
     );
   }
 

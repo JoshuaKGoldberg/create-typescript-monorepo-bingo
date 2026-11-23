@@ -6,8 +6,8 @@ import { parse as parseYaml } from 'yaml';
 
 import type { CatalogMode, PackageKind, PackageSpec, RootOptions, TaskRunner } from '../options.ts';
 import { type DependencyField, dependencyFields } from '../utils/catalogs.ts';
+import { type Choices, readChoices } from '../utils/choices.ts';
 import {
-  findAlternateConfig,
   getDirectory,
   getEntry,
   isOwnedFile,
@@ -110,11 +110,65 @@ export function prepareRoot(
     ...(workspacePackages.some(extendsRootTSConfig) && { rootTSConfigExtended: true }),
     ...inferTitle(files),
     ...inferTypeScript7Alias(rootManifest, workspace),
-    ...inferFormatter(files, rootManifest),
+    ...inferChoices(files, rootManifest, workspacePackages),
+    // Choices made explicitly before, which the files alone may not show.
+    ...readChoices(files),
     ...inferVitestConfig(files),
-    ...inferTestRunner(files, rootManifest, workspacePackages),
     ...inferWorkflowExtension(files),
   };
+}
+
+function inferChoices(
+  files: IntakeDirectory,
+  manifest: PackageManifest | undefined,
+  packages: WorkspacePackage[],
+): Choices {
+  return {
+    ...inferFormatter(files, manifest),
+    ...inferTestRunner(files, manifest, packages),
+  };
+}
+
+/**
+ * Finds choices that differ from what a repository's files alone would infer, which later
+ * transitions therefore need to be told, along with ones already remembered.
+ */
+export function findExplicitChoices(files: IntakeDirectory, options: RootOptions): Choices {
+  const workspace = readWorkspaceYaml(files);
+  const inferred: Choices = {
+    formatter: 'oxfmt',
+    linter: 'eslint',
+    testRunner: 'vitest',
+    // A new repository has nothing to infer from: the defaults above are its own.
+    ...(Object.keys(files).length > 0 &&
+      inferChoices(
+        files,
+        readJson(files, 'package.json'),
+        findWorkspacePackages(files, workspace?.packages ?? ['packages/*']),
+      )),
+  };
+  return getExplicitChoices(options, inferred, readChoices(files));
+}
+
+/**
+ * Picks the choices to remember, given what would be inferred and what already is.
+ */
+export function getExplicitChoices(
+  options: RootOptions,
+  inferred: Choices = {},
+  remembered: Choices = {},
+): Choices {
+  const current: Required<Choices> = {
+    formatter: options.formatter ?? 'oxfmt',
+    linter: options.linter ?? 'eslint',
+    testRunner: options.testRunner ?? 'vitest',
+  };
+  return Object.fromEntries(
+    Object.entries(current).filter(
+      ([name, value]) =>
+        name in remembered || (inferred as Record<string, unknown>)[name] !== value,
+    ),
+  );
 }
 
 interface WorkspaceYaml {
@@ -580,7 +634,11 @@ function inferWorkflowExtension(files: IntakeDirectory): Partial<RootOptions> {
     }
   }
 
-  return {};
+  // With none of those, CTM's follow the repository's, if they're all the same.
+  const names = Object.keys(workflows);
+  return names.length && names.every((name) => name.endsWith('.yml'))
+    ? { workflowExtension: 'yml' }
+    : {};
 }
 
 /**
@@ -647,10 +705,7 @@ function inferFormatter(
 ): Partial<RootOptions> {
   const record = manifest as (PackageManifest & Record<string, unknown>) | undefined;
   const dependencies = { ...(record?.dependencies as object), ...manifest?.devDependencies };
-  const usesOxfmt =
-    'oxfmt' in dependencies ||
-    !!getEntry(files, 'oxfmt.config.ts') ||
-    !!findAlternateConfig(files, 'oxfmt');
+  const usesOxfmt = 'oxfmt' in dependencies || !!getEntry(files, 'oxfmt.config.ts');
   const usesPrettier =
     'prettier' in dependencies ||
     !!record?.prettier ||
@@ -669,14 +724,10 @@ function inferFormatter(
   const formatsWithBiome =
     ('@biomejs/biome' in dependencies || biomeConfig !== undefined) &&
     biomeFormatter?.enabled !== false;
-  const scripts = Object.values(manifest?.scripts ?? {}).join('\n');
-  if (formatsWithBiome && (!usesPrettier || /\bbiome (?:check|ci|format)\b/.test(scripts))) {
-    return { formatter: 'biome' };
-  }
 
   // Styling CTM doesn't recognize, like dprint's or ESLint's, is left alone rather than
   // reformatted, and so is a repository with none.
-  return { formatter: usesPrettier ? 'prettier' : 'none' };
+  return { formatter: usesPrettier ? 'prettier' : formatsWithBiome ? 'biome' : 'none' };
 }
 
 /**

@@ -89,6 +89,17 @@ const scenarios: Scenario[] = [
     ],
   },
   {
+    checks: allChecks.filter(
+      (check) => check !== 'pnpm lint' && check !== 'pnpm format --list-different',
+    ),
+    // Choices later transitions, which aren't given them, have to remember.
+    name: 'opted-out',
+    steps: [
+      { mode: 'setup', options: { ...newRepository, formatter: 'none', linter: 'none' } },
+      { mode: 'transition', options: { newPackage: 'second' } },
+    ],
+  },
+  {
     checks: allChecks,
     // Repeated folder names across parents, and a package in a top-level directory.
     name: 'multi-parent',

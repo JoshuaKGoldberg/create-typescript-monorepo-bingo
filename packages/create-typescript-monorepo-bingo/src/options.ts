@@ -90,8 +90,11 @@ export const rootOptionsShape = {
   formatter: literalUnion(['oxfmt', 'prettier', 'biome', 'none'] as const)
     .optional()
     .describe(
-      "formatter: 'oxfmt', or 'prettier' or 'biome' for repositories that already use them",
+      "formatter: 'oxfmt', 'prettier' or 'biome' for repositories that already use them, or 'none'",
     ),
+  linter: literalUnion(['eslint', 'none'] as const)
+    .optional()
+    .describe("linter: 'eslint', or 'none' to not set up ESLint"),
   newPackage: z
     .string()
     .optional()

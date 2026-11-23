@@ -23,10 +23,12 @@ export const blockPnpmTasks = rootBase.createBlock({
     const scripts = parseJsonText(readText(files, 'package.json')).scripts as
       | Record<string, string>
       | undefined;
-    return scripts?.test === undefined ? undefined : { hasTest: true };
+    return /\bpnpm\b[^&|;]*\s(?:-r|--recursive|-F|--filter)\b/.test(scripts?.test ?? '')
+      ? { testsRecursively: true }
+      : undefined;
   },
   props: {
-    hasTest: z.boolean().optional(),
+    testsRecursively: z.boolean().optional(),
   },
   produce({ options, props }) {
     if (options.taskRunner !== 'pnpm') {
@@ -37,8 +39,8 @@ export const blockPnpmTasks = rootBase.createBlock({
 
     return {
       extensions: [
-        // Existing tests may rely on pnpm running dependencies' scripts first.
-        ...(props.hasTest
+        // Existing recursive tests may rely on pnpm running dependencies' scripts first.
+        ...(props.testsRecursively
           ? []
           : [blockPnpmWorkspace({ settings: { tasks: { test: { dependsOn: [] } } } })]),
         blockRootPackageJson({

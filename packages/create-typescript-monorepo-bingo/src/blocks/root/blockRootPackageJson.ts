@@ -6,7 +6,7 @@ import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
 import { type Dependencies, resolveDependencies } from '../../utils/catalogs.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
-import { formatPackageJson, keepSorted, sortKeys } from '../../utils/json.ts';
+import { formatPackageJson, mergeScripts, sortKeys } from '../../utils/json.ts';
 import { getAuthor, getRepositoryUrl } from '../../utils/options.ts';
 import { pin } from '../../utils/pins.ts';
 import { getMinimumVersion } from '../../utils/versions.ts';
@@ -81,7 +81,7 @@ export const blockRootPackageJson = rootBase.createBlock({
       ...deepWithDefaults(existing, props.properties ?? {}),
       // Existing scripts keep their order; a new file's are sorted.
       scripts: (props.existing === undefined ? sortKeys : (value: Record<string, string>) => value)(
-        mergeScripts(existing.scripts as Record<string, string>, props.scripts),
+        mergeScripts(existing.scripts as Record<string, string> | undefined, props.scripts ?? {}),
       ),
       devDependencies: sortKeys(dependencies),
       // devEngines.packageManager is the newer way to say the same thing.
@@ -113,23 +113,6 @@ export const blockRootPackageJson = rootBase.createBlock({
     };
   },
 });
-
-/**
- * Adds CTM's scripts that the repository doesn't have yet.
- */
-function mergeScripts(
-  existing: Record<string, string> | undefined,
-  ours: Record<string, string> | undefined,
-): Record<string, string> {
-  const merged = { ...existing };
-
-  // Scripts the repository already has are its own, such as builds with extra flags.
-  for (const [name, command] of Object.entries(ours ?? {})) {
-    merged[name] ??= command;
-  }
-
-  return keepSorted(existing, merged);
-}
 
 /**
  * Gets the packageManager value. An existing pnpm at least as new as the one asked for is

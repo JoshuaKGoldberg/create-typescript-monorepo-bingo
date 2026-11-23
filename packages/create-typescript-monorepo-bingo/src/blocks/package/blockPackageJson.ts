@@ -12,7 +12,7 @@ import {
   resolveDependencies,
 } from '../../utils/catalogs.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
-import { formatPackageJson, sortKeys } from '../../utils/json.ts';
+import { formatPackageJson, mergeScripts, sortKeys } from '../../utils/json.ts';
 import {
   buildsPerPackage,
   getAuthor,
@@ -108,11 +108,10 @@ export const blockPackageJson = packageBase.createBlock({
     // Targets a package's nx project.json defines aren't repeated as scripts.
     const targets = new Set(pkg.nxTargets);
     const merged = buildsPerPackage(options)
-      ? {
+      ? mergeScripts(existingScripts, {
           ...(!targets.has('build') && { build: 'tsdown' }),
           ...(usesTaskRunner(options) && test && !targets.has('test') && { test }),
-          ...existingScripts,
-        }
+        })
       : existingScripts;
     // A test script just as CTM writes it is CTM's: its project name follows the Vitest
     // config's, which changes as packages with the same folder name come and go.
@@ -158,8 +157,7 @@ export const blockPackageJson = packageBase.createBlock({
       },
       ...resolved,
       // An empty scripts object isn't added to a package that had none.
-      ...(scripts &&
-        (Object.keys(scripts).length || existingScripts) && { scripts: sortKeys(scripts) }),
+      ...(scripts && (Object.keys(scripts).length || existingScripts) && { scripts }),
       // A package's own engines.node is part of what it publishes, so it's kept.
       engines: {
         node: options.nodeEngines ?? defaults.nodeEngines,
