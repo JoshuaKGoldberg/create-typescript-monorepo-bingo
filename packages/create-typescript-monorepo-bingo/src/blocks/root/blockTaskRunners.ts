@@ -75,30 +75,34 @@ export const blockTurborepo = rootBase.createBlock({
           },
         }),
       ],
-      files: {
-        'turbo.json': formatJson(
-          withExisting(props.existingTurbo, {
-            $schema: 'https://turborepo.com/schema.json',
-            tasks: {
-              build: {
-                dependsOn: ['^build'],
-                // The build package's configs aren't a build dependency turbo can see.
-                inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/packages/build/**'],
-                outputs: ['dist/**', 'lib/**', 'node_modules/.cache/tsbuild/**'],
-              },
-              test: {
-                // Each package's tests run with the root Vitest config.
-                inputs: [
-                  '$TURBO_DEFAULT$',
-                  `$TURBO_ROOT$/${options.vitestConfig ?? 'vitest.config.ts'}`,
-                ],
-                outputs: [],
-              },
+      // An existing turbo.json is the repository's.
+      files:
+        props.existingTurbo !== undefined
+          ? {}
+          : {
+              'turbo.json': formatJson(
+                withExisting(props.existingTurbo, {
+                  $schema: 'https://turborepo.com/schema.json',
+                  tasks: {
+                    build: {
+                      dependsOn: ['^build'],
+                      // The build package's configs aren't a build dependency turbo can see.
+                      inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/packages/build/**'],
+                      outputs: ['dist/**', 'lib/**', 'node_modules/.cache/tsbuild/**'],
+                    },
+                    test: {
+                      // Each package's tests run with the root Vitest config.
+                      inputs: [
+                        '$TURBO_DEFAULT$',
+                        `$TURBO_ROOT$/${options.vitestConfig ?? 'vitest.config.ts'}`,
+                      ],
+                      outputs: [],
+                    },
+                  },
+                }),
+                props.existingTurbo,
+              ),
             },
-          }),
-          props.existingTurbo,
-        ),
-      },
     };
   },
 });
@@ -137,34 +141,38 @@ export const blockNx = rootBase.createBlock({
           },
         }),
       ],
-      files: {
-        'nx.json': formatJson(
-          withExisting(props.existingNx, {
-            $schema: './node_modules/nx/schemas/nx-schema.json',
-            namedInputs: {
-              default: ['{projectRoot}/**/*'],
-              production: ['default', '!{projectRoot}/**/*.test.ts'],
+      // An existing nx.json is the repository's, with its own plugins and target defaults.
+      files:
+        props.existingNx !== undefined
+          ? {}
+          : {
+              'nx.json': formatJson(
+                withExisting(props.existingNx, {
+                  $schema: './node_modules/nx/schemas/nx-schema.json',
+                  namedInputs: {
+                    default: ['{projectRoot}/**/*'],
+                    production: ['default', '!{projectRoot}/**/*.test.ts'],
+                  },
+                  targetDefaults: {
+                    build: {
+                      cache: true,
+                      dependsOn: ['^build'],
+                      inputs: ['production', '^production', '{workspaceRoot}/packages/build/**/*'],
+                      outputs: ['{projectRoot}/dist', '{projectRoot}/lib'],
+                    },
+                    test: {
+                      cache: true,
+                      inputs: [
+                        'default',
+                        '^production',
+                        `{workspaceRoot}/${options.vitestConfig ?? 'vitest.config.ts'}`,
+                      ],
+                    },
+                  },
+                }),
+                props.existingNx,
+              ),
             },
-            targetDefaults: {
-              build: {
-                cache: true,
-                dependsOn: ['^build'],
-                inputs: ['production', '^production', '{workspaceRoot}/packages/build/**/*'],
-                outputs: ['{projectRoot}/dist', '{projectRoot}/lib'],
-              },
-              test: {
-                cache: true,
-                inputs: [
-                  'default',
-                  '^production',
-                  `{workspaceRoot}/${options.vitestConfig ?? 'vitest.config.ts'}`,
-                ],
-              },
-            },
-          }),
-          props.existingNx,
-        ),
-      },
     };
   },
 });

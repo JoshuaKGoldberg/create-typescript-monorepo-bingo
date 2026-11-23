@@ -41,11 +41,13 @@ export const blockVSCode = rootBase.createBlock({
       | string[]
       | undefined;
     const extensions = mergeList(existingExtensions, props.extensions ?? []);
+    const existingSettings = parseJsonText(texts.settings);
     const settings = sortKeys({
       'editor.formatOnSave': true,
       'editor.rulers': [100],
       ...props.settings,
-      ...parseJsonText(texts.settings),
+      ...existingSettings,
+      ...updateStockTsdk(existingSettings, props.settings?.['js/ts.tsdk.path']),
     });
     const launch = texts.launch === undefined ? props.launch : parseJsonText(texts.launch);
 
@@ -79,3 +81,21 @@ export const blockVSCode = rootBase.createBlock({
     };
   },
 });
+
+const stockTsdk = 'node_modules/typescript/lib';
+
+/**
+ * The typescript alias's own lib/ has no tsserver.js, so tsdk settings pointing at the stock
+ * node_modules/typescript/lib are moved to CTM's path. Any other tsdk value is kept.
+ */
+function updateStockTsdk(existing: Record<string, unknown>, ours: unknown) {
+  if (typeof ours !== 'string') {
+    return {};
+  }
+
+  const stock = Object.keys(existing).filter(
+    (key) =>
+      (key === 'js/ts.tsdk.path' || key === 'typescript.tsdk') && existing[key] === stockTsdk,
+  );
+  return Object.fromEntries(stock.map((key) => [key, ours]));
+}

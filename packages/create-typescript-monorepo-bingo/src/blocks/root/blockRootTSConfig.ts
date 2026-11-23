@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
-import { formatJson } from '../../utils/json.ts';
+import { formatJson, withDefaults } from '../../utils/json.ts';
 import { getBuildPackageName, getPackageGlobs } from '../../utils/options.ts';
 
 interface TSConfigReference {
@@ -40,6 +40,8 @@ export const blockRootTSConfig = rootBase.createBlock({
       }
     }
 
+    // A solution-style config, with no files of its own, only gets references.
+    const isSolution = Array.isArray(existing.files) && !existing.files.length;
     const include = new Set([
       ...((existing.include as string[] | undefined) ?? [
         './*.config.ts',
@@ -54,12 +56,14 @@ export const blockRootTSConfig = rootBase.createBlock({
           {
             extends: `${getBuildPackageName(options)}/tsconfig.base.json`,
             ...existing,
-            compilerOptions: {
-              ...(existing.compilerOptions as object | undefined),
-              noEmit: true,
-              tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.json',
-            },
-            include: [...include],
+            // Existing compiler options are the repository's.
+            ...(!isSolution && {
+              compilerOptions: withDefaults(
+                existing.compilerOptions as Record<string, unknown> | undefined,
+                { noEmit: true, tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.json' },
+              ),
+              include: [...include],
+            }),
             references: references.map((path) => ({ path })),
           },
           props.existing,

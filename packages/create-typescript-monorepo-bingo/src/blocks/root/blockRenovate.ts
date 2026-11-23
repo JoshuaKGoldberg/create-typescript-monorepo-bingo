@@ -7,7 +7,7 @@ import {
   readText,
   withoutAlternate,
 } from '../../utils/files.ts';
-import { formatJson } from '../../utils/json.ts';
+import { formatJson, withDefaults } from '../../utils/json.ts';
 
 const rangeStrategiesByCatalog: Record<string, string> = {
   dev: 'pin',
@@ -58,13 +58,14 @@ export const blockRenovate = rootBase.createBlock({
         '.github': {
           'renovate.json': formatJson(
             {
-              $schema: 'https://docs.renovatebot.com/renovate-schema.json',
-              automerge: true,
-              extends: [':preserveSemverRanges', 'config:best-practices', 'replacements:all'],
-              labels: ['dependencies'],
-              minimumReleaseAge: '7 days',
-              postUpdateOptions: ['pnpmDedupe'],
-              ...existing,
+              ...withDefaults(props.existing === undefined ? undefined : existing, {
+                $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+                automerge: true,
+                extends: [':preserveSemverRanges', 'config:best-practices', 'replacements:all'],
+                labels: ['dependencies'],
+                minimumReleaseAge: '7 days',
+                postUpdateOptions: ['pnpmDedupe'],
+              }),
               ...(packageRules.length && { packageRules }),
             },
             props.existing,

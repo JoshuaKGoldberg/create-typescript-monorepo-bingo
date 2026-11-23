@@ -120,6 +120,14 @@ export const blockBuildPackage = rootBase.createBlock({
       .optional(),
   },
   produce({ options, props }) {
+    // A repository with no tsdown-built packages has its own build: nothing here applies.
+    if (
+      props.existing?.packageJson === undefined &&
+      !(options.packages ?? []).some((pkg) => pkg.kind === 'library')
+    ) {
+      return {};
+    }
+
     const existingTexts = props.existing ?? {};
     const existing = parseJsonText(existingTexts.packageJson);
     const existingTSConfig = parseJsonText(existingTexts.tsconfig);

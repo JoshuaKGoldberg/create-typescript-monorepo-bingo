@@ -49,7 +49,11 @@ export function formatWorkflow(value: unknown): string {
 export function formatYamlFile(
   value: unknown,
   existingText: string | undefined,
-  { name, workflow = false }: { name?: string; workflow?: boolean } = {},
+  {
+    name,
+    scripts = {},
+    workflow = false,
+  }: { name?: string; scripts?: Record<string, string>; workflow?: boolean } = {},
 ): string {
   if (existingText === undefined) {
     return workflow ? formatWorkflow(value) : formatYaml(value);
@@ -81,6 +85,12 @@ export function formatYamlFile(
 
     if (existing) {
       changed = syncNodeVersions(document, existing.value, job) || changed;
+      continue;
+    }
+
+    // A job that does the same thing under another id, like typecheck for type_check,
+    // or another job running the same action, is the repository's version of it.
+    if (hasEquivalentJob(document.toJS() as unknown, job, scripts)) {
       continue;
     }
 
@@ -138,7 +148,55 @@ function getPath(value: Record<string, unknown>, path: string[]): unknown {
 }
 
 function normalizeJobId(id: string) {
-  return id.toLowerCase().replaceAll('-', '_');
+  return id.toLowerCase().replaceAll(/[-_]/g, '');
+}
+
+function hasEquivalentJob(workflow: unknown, job: unknown, scripts: Record<string, string>) {
+  const existingJobs = isPlainObject(workflow) && isPlainObject(workflow.jobs) ? workflow.jobs : {};
+  const ours = getSteps(job);
+  const actions = ours.flatMap((step) => (step.uses ? [normalizeUses(step.uses)] : []));
+  const distinctive = actions.filter(
+    (uses) => !uses.startsWith('$/') && !uses.startsWith('./') && uses !== 'actions/checkout',
+  );
+  const runs = ours.flatMap((step) => (step.run ? [normalizeRun(step.run, scripts)] : []));
+
+  return Object.values(existingJobs).some((existingJob) => {
+    const steps = getSteps(existingJob);
+    const existingActions = new Set(
+      steps.flatMap((step) => (step.uses ? [normalizeUses(step.uses)] : [])),
+    );
+    const existingRuns = new Set(
+      steps.flatMap((step) => (step.run ? [normalizeRun(step.run, scripts)] : [])),
+    );
+    return (
+      (distinctive.length > 0 && distinctive.every((uses) => existingActions.has(uses))) ||
+      (runs.length > 0 && runs.every((run) => existingRuns.has(run)))
+    );
+  });
+}
+
+function getSteps(job: unknown): { run?: string; uses?: string }[] {
+  return isPlainObject(job) && Array.isArray(job.steps)
+    ? job.steps.filter((step): step is { run?: string; uses?: string } => isPlainObject(step))
+    : [];
+}
+
+function normalizeUses(uses: string) {
+  const at = uses.indexOf('@', 1);
+  return (at === -1 ? uses : uses.slice(0, at)).toLowerCase();
+}
+
+/**
+ * Normalizes a command, expanding a pnpm script to what it runs, so \`pnpm typecheck\`
+ * and \`pnpm exec tsc -b\` compare equal when the typecheck script is \`tsc -b\`.
+ */
+function normalizeRun(run: string, scripts: Record<string, string>): string {
+  const command = run.trim().replace(/^(?:pnpm (?:run |exec )?|npx )/, '');
+  const [name = '', ...args] = command.split(/\s+/);
+  const script = scripts[name];
+  return script && script !== command
+    ? normalizeRun([script, ...args].join(' '), {})
+    : command.replaceAll(/\s+/g, ' ');
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

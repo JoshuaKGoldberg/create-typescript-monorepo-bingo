@@ -79,7 +79,7 @@ export function prepareRoot(
     ...(catalogs === 'named' && {
       catalogExcluded: findNamedConflicts(manifests, workspace?.catalogs),
     }),
-    ...(rootManifest?.description && { description: rootManifest.description }),
+    ...inferDescription(files, rootManifest),
     ...(readText(files, '.nvmrc') && { node: readText(files, '.nvmrc')?.trim() }),
     ...(rootManifest?.engines?.node && { nodeEngines: rootManifest.engines.node }),
     ...(repository && repository),
@@ -533,4 +533,27 @@ function inferVitestConfig(files: IntakeDirectory): Partial<RootOptions> {
     'vite.config.mjs',
   ].find((candidate) => getEntry(files, candidate));
   return name ? { vitestConfig: name } : {};
+}
+
+/**
+ * Infers the description from the root package.json, or else the README's tagline, so
+ * transitions (including the weekly workflow's) never need to prompt for it.
+ */
+function inferDescription(
+  files: IntakeDirectory,
+  manifest: PackageManifest | undefined,
+): Partial<RootOptions> {
+  if (manifest?.description) {
+    return { description: manifest.description };
+  }
+
+  const readme = readText(files, 'README.md') ?? '';
+  const tagline =
+    /<p align="center">([^<]+)<\/p>/.exec(readme)?.[1] ??
+    readme
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line && !/^[#<!>[|`-]/.test(line));
+
+  return tagline ? { description: tagline.trim() } : {};
 }

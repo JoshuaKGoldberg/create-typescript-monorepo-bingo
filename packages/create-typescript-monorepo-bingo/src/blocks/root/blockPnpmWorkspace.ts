@@ -1,4 +1,6 @@
-import { Document, isMap, isNode, isScalar, isSeq, parseDocument } from 'yaml';
+import { isDeepStrictEqual } from 'node:util';
+
+import { Document, isMap, isNode, isScalar, isSeq, parseDocument, parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
@@ -40,6 +42,9 @@ export const blockPnpmWorkspace = rootBase.createBlock({
     // Maps that were sorted (or are new) stay sorted; hand-ordered ones keep their order.
     const unsortedMaps = new WeakSet();
     collectUnsortedMaps(document.contents, unsortedMaps);
+    const originalKeys = new Set(
+      isMap(document.contents) ? document.contents.items.map((pair) => keyText(pair.key)) : [],
+    );
 
     // Package globs: keep what's there, adding any new ones.
     const existingGlobs = readStrings(document.get('packages'));
@@ -55,7 +60,11 @@ export const blockPnpmWorkspace = rootBase.createBlock({
     }
 
     for (const [key, value] of Object.entries(props.settings ?? {})) {
-      setDeep(document, [key], value);
+      setDeep(
+        document,
+        [key],
+        key === 'permissions' ? withoutAllowedBuilds(document, value) : value,
+      );
     }
 
     // The default catalog is written wherever it already is: catalog, or catalogs.default.
@@ -75,7 +84,14 @@ export const blockPnpmWorkspace = rootBase.createBlock({
     }
 
     sortMaps(document.contents, unsortedMaps);
-    spaceTopLevel(document);
+    spaceTopLevel(document, originalKeys);
+
+    // A file whose content doesn't change is written back exactly as it was.
+    const text =
+      props.existing !== undefined &&
+      isDeepStrictEqual(parseYaml(props.existing) as unknown, document.toJS() as unknown)
+        ? props.existing
+        : document.toString({ flowCollectionPadding: false, singleQuote: true });
 
     return {
       suggestions: (options.catalogExcluded ?? []).map(
@@ -83,10 +99,7 @@ export const blockPnpmWorkspace = rootBase.createBlock({
           `${excluded.replace(':', ' catalog: ')} has different versions across packages, so it's left out of catalogs. Align them to catalog it.`,
       ),
       files: {
-        'pnpm-workspace.yaml': document.toString({
-          flowCollectionPadding: false,
-          singleQuote: true,
-        }),
+        'pnpm-workspace.yaml': text,
       },
     };
   },
@@ -229,27 +242,44 @@ function sortMaps(node: unknown, unsorted: WeakSet<object>) {
 /**
  * If top-level keys are separated by blank lines, keeps new ones separated too.
  */
-function spaceTopLevel(document: Document) {
+function spaceTopLevel(document: Document, originalKeys: Set<string>) {
   const node = document.contents;
   if (!isMap(node)) {
     return;
   }
 
+  // New keys get a blank line before them only when most existing keys have one.
   const pairs = node.items.slice(1);
-  if (!pairs.some((pair) => isNode(pair.key) && pair.key.spaceBefore)) {
+  const spaced = pairs.filter((pair) => isNode(pair.key) && pair.key.spaceBefore).length;
+  if (spaced * 2 < pairs.length) {
     return;
   }
 
   for (const pair of pairs) {
-    const key = isNode(pair.key) ? pair.key : document.createNode(pair.key);
-    key.spaceBefore = true;
-    pair.key = key;
+    if (!originalKeys.has(keyText(pair.key))) {
+      const key = isNode(pair.key) ? pair.key : document.createNode(pair.key);
+      key.spaceBefore = true;
+      pair.key = key;
+    }
   }
 
   const first = node.items[0]?.key;
-  if (isNode(first)) {
+  if (isNode(first) && !originalKeys.has(keyText(first))) {
     first.spaceBefore = false;
   }
+}
+
+/**
+ * Leaves out build permissions for packages the repository's allowBuilds already covers.
+ */
+function withoutAllowedBuilds(document: Document, permissions: unknown) {
+  const allowBuilds = document.get('allowBuilds');
+  if (!isMap(allowBuilds) || !permissions || typeof permissions !== 'object') {
+    return permissions;
+  }
+
+  const allowed = new Set(allowBuilds.items.map((pair) => keyText(pair.key)));
+  return Object.fromEntries(Object.entries(permissions).filter(([name]) => !allowed.has(name)));
 }
 
 function keyText(key: unknown) {

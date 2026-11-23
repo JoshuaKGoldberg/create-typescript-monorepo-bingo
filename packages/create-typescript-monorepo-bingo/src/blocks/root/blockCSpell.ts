@@ -33,14 +33,23 @@ export const blockCSpell = rootBase.createBlock({
   },
   intake({ files }) {
     const alternate = findAlternateConfig(files, 'cspell');
-    const fromFiles = ((): object | undefined => {
-      const existing = readText(files, 'cspell.json');
-      return existing === undefined ? undefined : { existing };
-    })();
-    return alternate ? { ...fromFiles, alternate } : fromFiles;
+    const existing = readText(files, 'cspell.json');
+    const scripts = Object.values(
+      (parseJsonText(readText(files, 'package.json'), 'package.json').scripts as
+        | Record<string, string>
+        | undefined) ?? {},
+    );
+    return {
+      ...(alternate && { alternate }),
+      ...(existing !== undefined && { existing }),
+      // A repository that has a cspell.json but doesn't run cspell uses it for editors only.
+      ...(existing !== undefined &&
+        !scripts.some((script) => script.includes('cspell')) && { editorOnly: true }),
+    };
   },
   props: {
     alternate: z.string().optional(),
+    editorOnly: z.boolean().optional(),
     existing: z.string().optional(),
     ignorePaths: z.array(z.string()).optional(),
     words: z.array(z.string()).optional(),
@@ -50,18 +59,24 @@ export const blockCSpell = rootBase.createBlock({
     const list = (key: string) => existing[key] as string[] | undefined;
 
     return withoutAlternate(props.alternate, 'cspell.json', {
-      extensions: [
-        blockGitHubActionsCI({
-          jobs: [
-            { id: 'lint_spelling', name: 'Lint Spelling', steps: [{ run: 'pnpm lint:spelling' }] },
+      extensions: props.editorOnly
+        ? [blockVSCode({ extensions: ['streetsidesoftware.code-spell-checker'] })]
+        : [
+            blockGitHubActionsCI({
+              jobs: [
+                {
+                  id: 'lint_spelling',
+                  name: 'Lint Spelling',
+                  steps: [{ run: 'pnpm lint:spelling' }],
+                },
+              ],
+            }),
+            blockRootPackageJson({
+              devDependencies: pinned('cspell'),
+              scripts: { 'lint:spelling': 'cspell "**" ".github/**/*"' },
+            }),
+            blockVSCode({ extensions: ['streetsidesoftware.code-spell-checker'] }),
           ],
-        }),
-        blockRootPackageJson({
-          devDependencies: pinned('cspell'),
-          scripts: { 'lint:spelling': 'cspell "**" ".github/**/*"' },
-        }),
-        blockVSCode({ extensions: ['streetsidesoftware.code-spell-checker'] }),
-      ],
       files: {
         'cspell.json': formatJson(
           {

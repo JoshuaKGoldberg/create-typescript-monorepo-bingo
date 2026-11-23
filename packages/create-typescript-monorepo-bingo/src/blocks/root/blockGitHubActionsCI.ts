@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
-import { readText } from '../../utils/files.ts';
+import { parseJsonText, readText } from '../../utils/files.ts';
 import { getWorkflowPath } from '../../utils/options.ts';
 import { formatYamlFile } from '../../utils/yaml.ts';
 
@@ -74,11 +74,25 @@ export const blockGitHubActionsCI = rootBase.createBlock({
   },
   intake({ files, options }) {
     const existing = readText(files, `.github/workflows/${getWorkflowPath(options, 'ci')}`);
-    return existing === undefined ? undefined : { existing };
+    const setupAction =
+      readText(files, '.github/actions/setup/action.yaml') ??
+      readText(files, '.github/actions/setup/action.yml');
+    const rootScripts = parseJsonText(readText(files, 'package.json'), 'package.json').scripts as
+      | Record<string, string>
+      | undefined;
+    return {
+      ...(existing !== undefined && { existing }),
+      ...(rootScripts && { rootScripts }),
+      // A repository's own setup action may not take the inputs the engines check needs.
+      ...(setupAction !== undefined &&
+        !setupAction.includes('install-flags') && { setupLacksInstallFlags: true }),
+    };
   },
   props: {
     existing: z.string().optional(),
     jobs: z.array(ciJobSchema).optional(),
+    rootScripts: z.record(z.string(), z.string()).optional(),
+    setupLacksInstallFlags: z.boolean().optional(),
   },
   produce({ options, props }) {
     const nodeVersions = getNodeVersionsMatrix(options.nodeEngines ?? defaults.nodeEngines);
@@ -106,7 +120,9 @@ export const blockGitHubActionsCI = rootBase.createBlock({
     // so an earlier version of a job can still be in props: the latest one wins.
     const byId = new Map<string, CIJob>();
     for (const job of jobs) {
-      byId.set(job.id, job);
+      if (!(job.id === 'engines_check' && props.setupLacksInstallFlags)) {
+        byId.set(job.id, job);
+      }
     }
 
     return {
@@ -130,6 +146,7 @@ export const blockGitHubActionsCI = rootBase.createBlock({
               props.existing,
               {
                 name: `.github/workflows/ci.${options.workflowExtension ?? 'yaml'}`,
+                scripts: props.rootScripts,
                 workflow: true,
               },
             ).replace('pull_request: null', 'pull_request: ~'),

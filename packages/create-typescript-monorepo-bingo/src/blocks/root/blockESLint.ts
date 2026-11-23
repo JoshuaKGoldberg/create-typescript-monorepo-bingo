@@ -2,7 +2,15 @@ import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
-import { findAlternateConfig, getEntry, readText, withoutAlternate } from '../../utils/files.ts';
+import {
+  describeUnownedFile,
+  findAlternateConfig,
+  getEntry,
+  isOwnedFile,
+  ownedFileMarker,
+  readText,
+  withoutAlternate,
+} from '../../utils/files.ts';
 import { mergeList } from '../../utils/lists.ts';
 import { getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
@@ -49,12 +57,15 @@ export const blockESLint = rootBase.createBlock({
       ...(existingIgnores && { existingIgnores }),
       ...(extras && { extras }),
       ...(existing !== undefined && !isParseable(existing) && { unparseable: true }),
+      // A config CTM didn't create is the repository's, like the other owned files.
+      ...(!isOwnedFile(existing) && { unowned: true }),
       ...(legacy && { legacy }),
     };
   },
   props: {
     alternate: z.string().optional(),
     legacy: z.string().optional(),
+    unowned: z.boolean().optional(),
     unparseable: z.boolean().optional(),
     extras: z
       .object({
@@ -79,6 +90,10 @@ export const blockESLint = rootBase.createBlock({
     lintPrebuildSteps: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
+    if (props.unowned) {
+      return { suggestions: [describeUnownedFile('eslint.config.ts')] };
+    }
+
     const ignores = mergeList(props.existingIgnores?.values, [
       ...baseIgnores,
       ...getPackageGlobs(options, 'dist'),
@@ -201,7 +216,8 @@ function createESLintConfig(
   },
 ) {
   const replaced = new Set(extras?.replacedImports);
-  return `${extras?.header.length ? `${extras.header.join('\n')}\n\n` : ''}${ownImports
+  return `${ownedFileMarker}
+${extras?.header.filter((comment) => comment !== ownedFileMarker).length ? `${extras.header.filter((comment) => comment !== ownedFileMarker).join('\n')}\n\n` : ''}${ownImports
     .filter(([module]) => !replaced.has(module))
     .map(([, line]) => `${line}\n`)
     .join(

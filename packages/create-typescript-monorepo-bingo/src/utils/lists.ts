@@ -8,9 +8,17 @@ export function mergeList(
   additions: readonly string[],
   compare?: (a: string, b: string) => number,
 ): string[] {
-  return existing
-    ? [...new Set([...existing, ...additions])]
-    : [...new Set(additions)].sort(compare);
+  if (!existing) {
+    return [...new Set(additions)].sort(compare);
+  }
+
+  // A list that's already sorted stays sorted.
+  const sorter = compare ?? ((a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0));
+  const sorted =
+    existing.length > 1 &&
+    existing.every((item, index) => index === 0 || sorter(existing[index - 1] ?? '', item) <= 0);
+  const merged = [...new Set([...existing, ...additions])];
+  return sorted && compare ? merged.sort(compare) : merged;
 }
 
 /**

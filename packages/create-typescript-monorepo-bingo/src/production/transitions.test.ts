@@ -4,6 +4,7 @@ import { parse as parseYaml } from 'yaml';
 
 import type { RootOptions } from '../options.ts';
 import { prepareRoot } from '../prepare/prepareRoot.ts';
+import { ownedFileMarker } from '../utils/files.ts';
 import { isParseable } from '../utils/staticConfig.ts';
 import { produceMonorepo } from './produceMonorepo.ts';
 
@@ -326,7 +327,8 @@ export default config;
     setFile(
       files,
       'eslint.config.ts',
-      `// @ts-check\n${config
+      config
+        .replace(ownedFileMarker, `${ownedFileMarker}\n// @ts-check`)
         .replace(
           "import tseslint from 'typescript-eslint';",
           "import tseslint from 'typescript-eslint';\n\nconst scriptGlobs = ['scripts/**/*.ts'];",
@@ -334,12 +336,12 @@ export default config;
         .replace(
           /\);\n$/,
           "  { files: ['**/*.json'], rules: { 'jsonc/sort-keys': 'error' } },\n  { ignores: ['generated/**'] },\n  { files: scriptGlobs, rules: {} },\n);\n",
-        )}`,
+        ),
     );
 
     const output = getFile(transition(files).files, 'eslint.config.ts') ?? '';
 
-    expect(output.startsWith('// @ts-check')).toBe(true);
+    expect(output.startsWith(`${ownedFileMarker}\n// @ts-check`)).toBe(true);
     expect(output).toContain("const scriptGlobs = ['scripts/**/*.ts'];");
     expect(output).toContain("rules: { 'jsonc/sort-keys': 'error' }");
     expect(output).toContain("{ ignores: ['generated/**'] }");
@@ -412,22 +414,11 @@ export default config;
     expect(output).toContain('\t"name"');
   });
 
-  it('merges an existing nx.json without dropping its settings', () => {
+  it('leaves an existing nx.json alone', () => {
     const files = createRepository({ taskRunner: 'nx' });
-    setFile(
-      files,
-      'nx.json',
-      JSON.stringify({ nxCloudId: 'abc', targetDefaults: { build: { cache: false } } }, null, 2),
-    );
+    setFile(files, 'nx.json', JSON.stringify({ nxCloudId: 'abc' }, null, 2));
 
-    const nx = JSON.parse(getFile(transition(files).files, 'nx.json') ?? '{}') as {
-      nxCloudId: string;
-      targetDefaults: { build: { cache: boolean; dependsOn: string[] } };
-    };
-
-    expect(nx.nxCloudId).toBe('abc');
-    expect(nx.targetDefaults.build.cache).toBe(false);
-    expect(nx.targetDefaults.build.dependsOn).toEqual(['^build']);
+    expect(getFile(transition(files).files, 'nx.json')).toBeUndefined();
   });
 
   it('refuses a repository whose root is a published package', () => {
@@ -452,6 +443,7 @@ export default config;
       delete manifest.devDependencies[name];
     }
     manifest.devDependencies.prettier = '3.6.0';
+    delete (manifest as { scripts?: Record<string, string> }).scripts?.format;
     manifest.devDependencies.husky = '9.1.7';
     setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
     setFile(files, '.prettierrc.json', '{ "useTabs": true }\n');
@@ -537,5 +529,16 @@ export default config;
     expect(first).toContain(expected ?? entries.trimEnd());
     expect(second).toBe(first);
     expect(isParseable(first)).toBe(true);
+  });
+
+  it('leaves an eslint.config.ts CTM did not create alone', () => {
+    const files = createRepository();
+    const config = (getFile(files, 'eslint.config.ts') ?? '').replace(`${ownedFileMarker}\n`, '');
+    setFile(files, 'eslint.config.ts', config);
+
+    const creation = transition(files);
+
+    expect(getFile(creation.files, 'eslint.config.ts')).toBeUndefined();
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('eslint.config.ts'));
   });
 });

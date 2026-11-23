@@ -62,9 +62,15 @@ export const blockRootPackageJson = rootBase.createBlock({
       private: true,
       // Tool settings, like lint-staged and simple-git-hooks, only fill in what's missing.
       ...deepWithDefaults(existing, props.properties ?? {}),
-      scripts: sortKeys(mergeScripts(existing.scripts as Record<string, string>, props.scripts)),
+      // Existing scripts keep their order; a new file's are sorted.
+      scripts: (props.existing === undefined ? sortKeys : (value: Record<string, string>) => value)(
+        mergeScripts(existing.scripts as Record<string, string>, props.scripts),
+      ),
       devDependencies: sortKeys(dependencies),
-      packageManager: getPackageManager(existing.packageManager, options.pnpm ?? defaults.pnpm),
+      // devEngines.packageManager is the newer way to say the same thing.
+      ...(!(existing.devEngines as { packageManager?: unknown } | undefined)?.packageManager && {
+        packageManager: getPackageManager(existing.packageManager, options.pnpm ?? defaults.pnpm),
+      }),
       engines: {
         ...(existing.engines as object | undefined),
         node: options.nodeEngines ?? defaults.nodeEngines,
@@ -84,8 +90,9 @@ export const blockRootPackageJson = rootBase.createBlock({
     };
   },
   transition() {
+    // Dependencies CTM adds can leave duplicates that pnpm dedupe --check would fail on.
     return {
-      scripts: [{ commands: ['pnpm install'], phase: 0 }],
+      scripts: [{ commands: ['pnpm install', 'pnpm dedupe'], phase: 0 }],
     };
   },
 });

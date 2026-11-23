@@ -1,3 +1,4 @@
+// Managed by create-typescript-monorepo-bingo: changes here are replaced on transitions.
 import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 import js from '@eslint/js';
 import markdown from '@eslint/markdown';

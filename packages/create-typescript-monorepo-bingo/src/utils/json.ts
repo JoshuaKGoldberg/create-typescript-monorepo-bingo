@@ -10,6 +10,14 @@ import { printValue, readJsonLayout } from './print.ts';
  * Objects and arrays that exist in `existingText` keep their one-line or multi-line layout.
  */
 export function formatJson(value: unknown, existingText?: string): string {
+  // A file whose content doesn't change is written back exactly as it was.
+  if (
+    existingText !== undefined &&
+    isDeepStrictEqual(parseJsonc(existingText, [], { allowTrailingComma: true }), value)
+  ) {
+    return existingText;
+  }
+
   if (existingText !== undefined && !isStrictJson(existingText)) {
     return editJsonc(existingText, value);
   }
@@ -25,7 +33,9 @@ export function formatJson(value: unknown, existingText?: string): string {
  * Detects an existing file's indentation, such as tabs, defaulting to two spaces.
  */
 function detectIndent(text: string | undefined) {
-  return /^([ \t]+)\S/m.exec(text ?? '')?.[1] ?? '  ';
+  // The shallowest indentation is one level.
+  const indents = [...(text ?? '').matchAll(/^([ \t]+)\S/gm)].map((match) => match[1]);
+  return indents.sort((a, b) => a.length - b.length).at(0) ?? '  ';
 }
 
 /**
