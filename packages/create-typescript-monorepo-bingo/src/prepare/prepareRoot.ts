@@ -229,6 +229,7 @@ function createPackageSpec(pkg: WorkspacePackage, all: WorkspacePackage[]): Pack
     kind: inferPackageKind(pkg),
     name: pkg.manifest.name ?? pkg.directory.split('/').pop() ?? pkg.directory,
     ...(pkg.manifest.scripts && { scripts: Object.keys(pkg.manifest.scripts) }),
+    ...getToolDevDependencies(pkg.manifest),
     ...(workspaceDependencies.length && { workspaceDependencies }),
   };
 }
@@ -542,6 +543,15 @@ function assertMonorepoRoot(manifest: PackageManifest | undefined) {
       `The root package.json is a published package${root.name ? ` (${root.name})` : ''}. create-typescript-monorepo-bingo manages monorepos with a private root and packages in workspace directories. If the root isn't published, add "private": true to it; for a single-package repository, see create-typescript-app.`,
     );
   }
+}
+
+function getToolDevDependencies(manifest: PackageManifest): Partial<PackageSpec> {
+  const tools = Object.fromEntries(
+    Object.entries(manifest.devDependencies ?? {}).filter(([name]) =>
+      ['tsdown', 'vitest'].includes(name),
+    ),
+  );
+  return Object.keys(tools).length ? { toolDevDependencies: tools } : {};
 }
 
 function mostCommon(values: (string | undefined)[]) {

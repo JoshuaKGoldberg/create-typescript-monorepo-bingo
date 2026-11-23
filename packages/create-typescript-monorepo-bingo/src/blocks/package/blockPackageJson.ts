@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { packageBase } from '../../bases/packageBase.ts';
-import { defaults, type PackageSpec } from '../../options.ts';
+import { defaults, type PackageSpec, type RootOptions } from '../../options.ts';
 import { asPackageExtension } from '../../production/asRootExtension.ts';
 import {
   type CatalogEntry,
@@ -53,6 +53,7 @@ export const blockPackageJson = packageBase.createBlock({
         [getBuildPackageName(options)]: 'workspace:^',
         // Existing packages keep their own choice of whether to use Node.js types.
         ...(isNew && { '@types/node': pin('@types/node') }),
+        ...(isNew && getSiblingToolDependencies(options, pkg)),
         ...props.devDependencies,
       },
       peerDependencies: props.peerDependencies,
@@ -98,13 +99,19 @@ export const blockPackageJson = packageBase.createBlock({
       options.testRunner === 'other' || options.vitestConfigUnowned
         ? undefined
         : `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${project}`;
-    const scripts = buildsPerPackage(options)
+    const merged = buildsPerPackage(options)
       ? {
           build: 'tsdown',
           ...(usesTaskRunner(options) && test && { test }),
           ...existingScripts,
         }
       : existingScripts;
+    // A test script just as CTM writes it is CTM's: its project name follows the Vitest
+    // config's, which changes as packages with the same folder name come and go.
+    const scripts =
+      test && merged?.test !== undefined && ctmTestScript.test(merged.test)
+        ? { ...merged, test }
+        : merged;
 
     const base = isNew
       ? {
@@ -174,6 +181,34 @@ function toRepositoryObject(repository: unknown, fallbackUrl: string): Record<st
     ? (repository as Record<string, unknown>)
     : { type: 'git', url: fallbackUrl };
 }
+
+/**
+ * Finds the tsdown and vitest devDependencies most other libraries declare themselves,
+ * as some repositories' lint rules require, so a new package declares them the same way.
+ */
+function getSiblingToolDependencies(options: RootOptions, pkg: PackageSpec) {
+  const others = (options.packages ?? []).filter(
+    (other) => other.kind === 'library' && other.directory !== pkg.directory,
+  );
+  const tools = options.testRunner === 'other' ? ['tsdown'] : ['tsdown', 'vitest'];
+
+  return Object.fromEntries(
+    tools.flatMap((tool) => {
+      const specifiers = others.flatMap((other) => other.toolDevDependencies?.[tool] ?? []);
+      if (specifiers.length * 2 <= others.length) {
+        return [];
+      }
+
+      const counts = new Map<string, number>();
+      for (const specifier of specifiers) {
+        counts.set(specifier, (counts.get(specifier) ?? 0) + 1);
+      }
+      return [[tool, [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? specifiers[0]]];
+    }),
+  );
+}
+
+const ctmTestScript = /^vitest run --config (?:\.\.\/)+vitest\.config\.ts --project \S+$/;
 
 /**
  * Finds a homepage that every other library package shares, like a project website.

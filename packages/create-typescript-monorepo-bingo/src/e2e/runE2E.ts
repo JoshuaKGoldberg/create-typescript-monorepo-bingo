@@ -114,6 +114,33 @@ const scenarios: Scenario[] = [
       { mode: 'transition', options: { newPackage: 'second' } },
     ],
   },
+  {
+    checks: [
+      'pnpm build',
+      'pnpm test',
+      'pnpm test:coverage',
+      'pnpm typecheck',
+      'pnpm lint',
+      'pnpm knip',
+      'pnpm lint:spelling',
+    ],
+    // A new package whose folder name another parent already has renames both projects.
+    name: 'multi-parent-turbo',
+    steps: [
+      {
+        mode: 'setup',
+        options: {
+          ...newRepository,
+          packages: [
+            { description: 'A CLI.', directory: 'apps/cli', kind: 'library', name: 'app-cli' },
+            { description: 'A core.', directory: 'packages/core', kind: 'library', name: 'core' },
+          ],
+          taskRunner: 'turbo',
+        },
+      },
+      { mode: 'transition', options: { newPackage: 'cli' } },
+    ],
+  },
   ...(['pnpm', 'turbo', 'nx'] as const).map((taskRunner) => ({
     checks: [
       'pnpm build',

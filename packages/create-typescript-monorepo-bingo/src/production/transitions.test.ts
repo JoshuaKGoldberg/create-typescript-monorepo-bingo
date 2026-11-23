@@ -1273,6 +1273,85 @@ describe('round 11 regressions', () => {
   });
 });
 
+describe('round 12 regressions', () => {
+  it('gives a new package the tsdown and vitest devDependencies most siblings declare', () => {
+    const files = createRepository();
+    applyFiles(files, transition(files, { newPackage: 'second' }).files);
+    for (const directory of ['example', 'second']) {
+      const pkg = JSON.parse(getFile(files, `packages/${directory}/package.json`) ?? '{}') as {
+        devDependencies: Record<string, string>;
+      };
+      pkg.devDependencies.tsdown = 'catalog:dev';
+      pkg.devDependencies.vitest = 'catalog:dev';
+      setFile(files, `packages/${directory}/package.json`, JSON.stringify(pkg, null, 2));
+    }
+
+    const third = getFile(
+      transition(files, { newPackage: 'third' }).files,
+      'packages/third/package.json',
+    );
+
+    expect(third).toContain('"tsdown": "catalog:dev"');
+    expect(third).toContain('"vitest": "catalog:dev"');
+  });
+
+  it('writes the template name as code in generated markdown', () => {
+    const files = createRepository();
+
+    expect(getFile(files, 'packages/build/README.md')).toContain(
+      '[`create-typescript-monorepo-bingo`](',
+    );
+  });
+
+  it('renames Vitest projects in package test scripts as folder names start repeating', () => {
+    const files = createRepository({
+      packages: [
+        { description: 'A CLI.', directory: 'apps/cli', kind: 'library', name: 'app-cli' },
+        { description: 'A core.', directory: 'packages/core', kind: 'library', name: 'core' },
+      ],
+      taskRunner: 'turbo',
+    });
+
+    expect(getFile(files, 'apps/cli/package.json')).toContain('--project cli"');
+
+    applyFiles(files, transition(files, { newPackage: 'cli' }).files);
+
+    expect(getFile(files, 'apps/cli/package.json')).toContain('--project apps/cli"');
+    expect(getFile(files, 'packages/cli/package.json')).toContain('--project packages/cli"');
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it("keeps a package's own test script that only looks like a Vitest one", () => {
+    const files = createRepository({ taskRunner: 'turbo' });
+    const pkg = JSON.parse(getFile(files, 'packages/example/package.json') ?? '{}') as {
+      scripts: Record<string, string>;
+    };
+    pkg.scripts.test = 'vitest run --project example --coverage';
+    setFile(files, 'packages/example/package.json', JSON.stringify(pkg, null, 2));
+
+    expect(getFile(transition(files).files, 'packages/example/package.json')).toContain(
+      'vitest run --project example --coverage',
+    );
+  });
+
+  it('drops the Vitest import when only strings or comments mention it', () => {
+    const files = createRepository();
+    setFile(
+      files,
+      'eslint.config.ts',
+      (getFile(files, 'eslint.config.ts') ?? '').replace(
+        /\n\);\n$/,
+        "\n  // Not linted: vitest.config.ts\n  { ignores: ['vitest.config.ts'] },\n);\n",
+      ),
+    );
+
+    const config = getFile(transition(files, { testRunner: 'other' }).files, 'eslint.config.ts');
+
+    expect(config).toContain("{ ignores: ['vitest.config.ts'] }");
+    expect(config).not.toContain('@vitest/eslint-plugin');
+  });
+});
+
 describe('round 11 adoption regressions', () => {
   it('references the build package from a new package', () => {
     const files = createRepository();

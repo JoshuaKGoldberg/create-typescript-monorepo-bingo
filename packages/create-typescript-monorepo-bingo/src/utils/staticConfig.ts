@@ -410,6 +410,8 @@ export function readESLintExtras(
   const statements: string[] = [];
   const exportComments: string[] = [];
   const declaredNames = new Set<string>();
+  // Names that kept statements and entries refer to, for deciding on dropped imports.
+  const referenced = new Set<string>();
   let previousStatementEnd = firstStart;
 
   for (const node of body) {
@@ -433,6 +435,7 @@ export function readESLintExtras(
       exportComments.push(...comments);
     } else if (node !== configDeclaration) {
       statements.push(text);
+      collectReferences(node, referenced);
     }
   }
 
@@ -455,14 +458,14 @@ export function readESLintExtras(
 
     if (index === -1) {
       configs.push([...comments, sourceText.slice(arg.start, arg.end)].join('\n  '));
+      collectReferences(arg, referenced);
     } else {
       remaining.splice(index, 1);
     }
   }
 
-  const kept = [...configs, ...statements].join('\n');
   for (const { names, text } of pendingImports) {
-    if (names.some((name) => new RegExp(`\\b${name}\\b`).test(kept))) {
+    if (names.some((name) => referenced.has(name))) {
       imports.push(text);
     }
   }
@@ -473,6 +476,38 @@ export function readESLintExtras(
     container && args.length ? getComments(sourceText.slice(previousEnd, container.end - 1)) : [];
 
   return { configs, exportComments, header, imports, replacedImports, statements, trailing };
+}
+
+/**
+ * Collects the identifiers a node refers to, leaving out property names and object keys,
+ * which aren't references, and strings and comments, which aren't in the AST.
+ */
+function collectReferences(node: unknown, names: Set<string>): void {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      collectReferences(child, names);
+    }
+    return;
+  }
+
+  if (!node || typeof node !== 'object') {
+    return;
+  }
+
+  const current = node as AstNode;
+  if (current.type === 'Identifier') {
+    names.add(current.name as string);
+    return;
+  }
+
+  for (const [key, value] of Object.entries(current)) {
+    const isName =
+      (key === 'property' && current.type === 'MemberExpression' && !current.computed) ||
+      (key === 'key' && current.type === 'Property' && !current.computed);
+    if (!isName) {
+      collectReferences(value, names);
+    }
+  }
 }
 
 function getImportedNames(node: AstNode): string[] {

@@ -265,7 +265,7 @@ It needs, once per repository:
 - An [npm trusted publisher](https://docs.npmjs.com/trusted-publishers) for each package, pointing at the release workflow (a package's very first version may need to be published manually)
 - [Codecov](https://codecov.io) enabled for the repository, for coverage uploads
 
-The same GitHub App is used by the weekly transitions workflow, which re-runs [create-typescript-monorepo-bingo](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo) and opens a PR with any changes.
+The same GitHub App is used by the weekly transitions workflow, which re-runs [\`create-typescript-monorepo-bingo\`](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo) and opens a PR with any changes.
 `,
     '.github/ISSUE_TEMPLATE/01-bug.{yaml}': createIssueTemplate(
       '🐛 Report a Bug',
@@ -353,7 +353,7 @@ ${packages.map((pkg) => `| [\`${pkg.name}\`](./${pkg.directory}) | ${pkg.descrip
 
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
-> 💝 This monorepo was templated with [create-typescript-monorepo-bingo](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo).
+> 💝 This monorepo was templated with [\`create-typescript-monorepo-bingo\`](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo).
 `,
   };
 }

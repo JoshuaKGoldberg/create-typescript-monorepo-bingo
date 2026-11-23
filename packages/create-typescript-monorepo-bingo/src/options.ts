@@ -20,6 +20,11 @@ export const packageSpecSchema = z.object({
   kind: z.enum(packageKinds),
   name: z.string(),
   scripts: z.array(z.string()).optional(),
+
+  /**
+   * The package's own tsdown and vitest devDependency specifiers, for new packages to match.
+   */
+  toolDevDependencies: z.record(z.string(), z.string()).optional(),
   tsdownWorkspaceReady: z.boolean().optional(),
   workspaceDependencies: z.array(z.string()).optional(),
 });
