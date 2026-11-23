@@ -1,13 +1,16 @@
+import type { IntakeDirectory } from 'bingo-fs';
+import semver from 'semver';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
-import { defaults } from '../../options.ts';
+import { defaults, type RootOptions } from '../../options.ts';
 import {
   describeUnownedFile,
   findAlternateConfig,
   getEntry,
   isOwnedFile,
   ownedFileMarker,
+  parseJsonText,
   readText,
   withoutAlternate,
 } from '../../utils/files.ts';
@@ -48,7 +51,17 @@ export const blockESLint = rootBase.createBlock({
       '.eslintrc.yml',
     ].find((name) => getEntry(files, name) !== undefined);
     const existingIgnores = readESLintIgnoresWithSource(existing);
+    const rootManifest = parseJsonText(readText(files, 'package.json'));
+    const eslintSpecifier = [rootManifest.devDependencies, rootManifest.dependencies]
+      .map((dependencies) => (dependencies as Record<string, string> | undefined)?.eslint)
+      .find((specifier) => specifier !== undefined);
+    // CTM's flat config, plugins and typed linting need ESLint 9 or newer.
+    const eslintMinimum =
+      eslintSpecifier && semver.validRange(eslintSpecifier)
+        ? semver.minVersion(eslintSpecifier)
+        : undefined;
     const vitest = options.testRunner !== 'other';
+    const packageJsonRulesOff = findMissingPackageFields(files, options);
     const extras = readESLintExtras(
       existing,
       createESLintConfig(
@@ -56,6 +69,8 @@ export const blockESLint = rootBase.createBlock({
         options.workflowExtension ?? defaults.workflowExtension,
         undefined,
         vitest,
+        options.formatter !== 'biome',
+        packageJsonRulesOff,
       ),
       // Without Vitest, CTM's own Vitest entry and import are dropped, but only as CTM wrote
       // them: a repository's own entry for test files, like one for Jest, stays.
@@ -63,6 +78,8 @@ export const blockESLint = rootBase.createBlock({
     );
     return {
       ...(alternate && { alternate }),
+      ...(packageJsonRulesOff.length && { packageJsonRulesOff }),
+      ...(eslintMinimum && eslintMinimum.major < 9 && { oldESLint: eslintSpecifier }),
       ...(existingIgnores && { existingIgnores }),
       ...(extras && { extras }),
       ...(existing !== undefined && !isParseable(existing) && { unparseable: true }),
@@ -74,6 +91,8 @@ export const blockESLint = rootBase.createBlock({
   props: {
     alternate: z.string().optional(),
     legacy: z.string().optional(),
+    oldESLint: z.string().optional(),
+    packageJsonRulesOff: z.array(z.string()).optional(),
     unowned: z.boolean().optional(),
     unparseable: z.boolean().optional(),
     extras: z
@@ -99,6 +118,14 @@ export const blockESLint = rootBase.createBlock({
     lintPrebuildSteps: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
+    if (props.oldESLint) {
+      return {
+        suggestions: [
+          `This repository uses ESLint ${props.oldESLint}, so CTM didn't set up its ESLint config, which needs ESLint 9 or newer. Update ESLint and re-run to add it.`,
+        ],
+      };
+    }
+
     if (props.unowned) {
       return { suggestions: [describeUnownedFile('eslint.config.ts')] };
     }
@@ -188,6 +215,9 @@ export const blockESLint = rootBase.createBlock({
             workflowExtension,
             props.extras,
             options.testRunner !== 'other',
+            // Biome sorts imports and exports itself, in its own order.
+            options.formatter !== 'biome',
+            props.packageJsonRulesOff,
           ),
         }),
       },
@@ -243,6 +273,8 @@ function createESLintConfig(
     trailing: string[];
   },
   vitest = true,
+  sorting = true,
+  packageJsonRulesOff: string[] = [],
 ) {
   const replaced = new Set(extras?.replacedImports);
   if (!vitest) {
@@ -295,10 +327,14 @@ ${extras?.exportComments.length ? `${extras.exportComments.join('\n')}\n` : ''}e
           message: "Do not use 'export * from' statements. Please export individual symbols.",
         },
       ],
-      'perfectionist/sort-exports': 'error',
+${
+  sorting
+    ? `      'perfectionist/sort-exports': 'error',
       'perfectionist/sort-named-exports': 'error',
       'perfectionist/sort-named-imports': 'error',
-
+`
+    : ''
+}
       // Stylistic concerns that don't interfere with Oxfmt
       'logical-assignment-operators': ['error', 'always', { enforceForIfStatements: true }],
       'no-useless-rename': 'error',
@@ -315,7 +351,18 @@ ${extras?.exportComments.length ? `${extras.exportComments.join('\n')}\n` : ''}e
     extends: [packageJson.configs.recommended, packageJson.configs.stylistic],
     files: ['**/package.json'],
   },
-  {
+${
+  packageJsonRulesOff.length
+    ? `  {
+    // Fields existing packages don't have, which CTM doesn't fill in for them
+    files: ['**/package.json'],
+    rules: {
+${packageJsonRulesOff.map((rule) => `      'package-json/${rule}': 'off',`).join('\n')}
+    },
+  },
+`
+    : ''
+}  {
     extends: [markdown.configs.recommended],
     files: ['**/*.md'],
     ignores: ['CHANGELOG.md'],
@@ -370,4 +417,52 @@ function insertIgnores(
   const at = insertAt + (needsCommaAt === undefined ? 0 : 1);
   const insertion = added.map((ignore) => `\n      ${ignore},`).join('');
   return `${withComma.slice(0, at)}${insertion}${withComma.slice(at)}`;
+}
+
+/**
+ * The package.json fields eslint-plugin-package-json's recommended config requires, and
+ * whether its rule also checks private packages.
+ */
+const requiredFields: [
+  rule: string,
+  has: (manifest: Record<string, unknown>) => boolean,
+  checksPrivate: boolean,
+][] = [
+  ['require-attribution', (manifest) => !!manifest.author || !!manifest.contributors, false],
+  ['require-description', (manifest) => !!manifest.description, true],
+  ['require-exports', (manifest) => manifest.exports !== undefined, false],
+  ['require-files', (manifest) => manifest.files !== undefined, false],
+  ['require-license', (manifest) => !!manifest.license, false],
+  ['require-name', (manifest) => !!manifest.name, false],
+  ['require-repository', (manifest) => !!manifest.repository, false],
+  ['require-sideEffects', (manifest) => manifest.sideEffects !== undefined, false],
+  ['require-type', (manifest) => !!manifest.type, true],
+  ['require-version', (manifest) => !!manifest.version, false],
+];
+
+/**
+ * Finds the required package.json fields existing packages lack and CTM doesn't fill in,
+ * like a library's sideEffects, whose rules would otherwise fail on adoption. CTM fills in
+ * the root's description and repository, and its libraries' names and repositories.
+ */
+function findMissingPackageFields(files: IntakeDirectory, options: RootOptions): string[] {
+  const manifests = [
+    { filled: ['require-description', 'require-repository'], path: 'package.json' },
+    ...(options.packages ?? []).map((pkg) => ({
+      filled: pkg.kind === 'library' ? ['require-name', 'require-repository'] : [],
+      path: `${pkg.directory}/package.json`,
+    })),
+  ].flatMap(({ filled, path }) => {
+    const text = readText(files, path);
+    return text === undefined ? [] : [{ filled, manifest: parseJsonText(text) }];
+  });
+
+  return requiredFields
+    .filter(([rule, has, checksPrivate]) =>
+      manifests.some(
+        ({ filled, manifest }) =>
+          !filled.includes(rule) && (checksPrivate || manifest.private !== true) && !has(manifest),
+      ),
+    )
+    .map(([rule]) => rule);
 }

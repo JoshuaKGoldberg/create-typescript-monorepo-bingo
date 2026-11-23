@@ -1,3 +1,4 @@
+import semver from 'semver';
 import { z } from 'zod';
 
 import { packageBase } from '../../bases/packageBase.ts';
@@ -72,7 +73,10 @@ export const blockPackageJson = packageBase.createBlock({
 
       const result = resolveDependencies(options, field, existingField, ours[field]);
       catalogEntries.push(...result.catalogEntries);
-      resolved[field] = sortKeys(result.dependencies);
+      // An empty field, like devDependencies an existing package never had, isn't written.
+      if (Object.keys(result.dependencies).length || existingField) {
+        resolved[field] = sortKeys(result.dependencies);
+      }
     }
 
     const sharedHomepage = getSharedHomepage(options.packages ?? [], pkg);
@@ -101,10 +105,12 @@ export const blockPackageJson = packageBase.createBlock({
       options.testRunner === 'other' || options.vitestConfigUnowned
         ? undefined
         : `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${project}`;
+    // Targets a package's nx project.json defines aren't repeated as scripts.
+    const targets = new Set(pkg.nxTargets);
     const merged = buildsPerPackage(options)
       ? {
-          build: 'tsdown',
-          ...(usesTaskRunner(options) && test && { test }),
+          ...(!targets.has('build') && { build: 'tsdown' }),
+          ...(usesTaskRunner(options) && test && !targets.has('test') && { test }),
           ...existingScripts,
         }
       : existingScripts;
@@ -151,7 +157,9 @@ export const blockPackageJson = packageBase.createBlock({
         directory: pkg.directory,
       },
       ...resolved,
-      ...(scripts && { scripts: sortKeys(scripts) }),
+      // An empty scripts object isn't added to a package that had none.
+      ...(scripts &&
+        (Object.keys(scripts).length || existingScripts) && { scripts: sortKeys(scripts) }),
       // A package's own engines.node is part of what it publishes, so it's kept.
       engines: {
         node: options.nodeEngines ?? defaults.nodeEngines,
@@ -207,7 +215,15 @@ function getSiblingToolDependencies(options: RootOptions, pkg: PackageSpec) {
       for (const specifier of specifiers) {
         counts.set(specifier, (counts.get(specifier) ?? 0) + 1);
       }
-      return [[tool, [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? specifiers[0]]];
+      const specifier = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? specifiers[0];
+      // A tsdown older than the one the build package's base is written for can't build it.
+      const minimum =
+        specifier && semver.validRange(specifier) ? semver.minVersion(specifier) : undefined;
+      if (tool === 'tsdown' && minimum && semver.lt(minimum, pin('tsdown'))) {
+        return [];
+      }
+
+      return [[tool, specifier]];
     }),
   );
 }

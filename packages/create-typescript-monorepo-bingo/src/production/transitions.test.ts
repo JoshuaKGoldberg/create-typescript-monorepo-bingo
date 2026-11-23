@@ -1274,6 +1274,172 @@ describe('round 11 regressions', () => {
   });
 });
 
+describe('round 14 adoption regressions', () => {
+  const editJson = (
+    files: IntakeDirectory,
+    path: string,
+    edit: (json: Record<string, unknown>) => void,
+  ) => {
+    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
+    edit(json);
+    setFile(files, path, JSON.stringify(json, null, 2));
+  };
+  const prepare = (files: IntakeDirectory) =>
+    prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never });
+
+  it('leaves a root tsconfig.json that packages extend alone', () => {
+    const files = createRepository();
+    const rootTSConfig = '{ "compilerOptions": { "strict": true } }\n';
+    setFile(files, 'tsconfig.json', rootTSConfig);
+    setFile(files, 'packages/example/tsconfig.json', '{ "extends": "../../tsconfig.json" }\n');
+    editJson(files, 'package.json', (manifest) => {
+      delete (manifest.scripts as Record<string, string>).typecheck;
+    });
+
+    const creation = transition(files);
+
+    expect(prepare(files).rootTSConfigExtended).toBe(true);
+    expect(getFile(creation.files, 'tsconfig.json') ?? rootTSConfig).toBe(rootTSConfig);
+    expect(getFile(creation.files, 'package.json')).not.toContain('"typecheck"');
+  });
+
+  it("leaves a package tsconfig that doesn't extend the build base alone", () => {
+    const files = createRepository();
+    const own = '{ "compilerOptions": { "strict": true }, "include": ["src", "test"] }\n';
+    setFile(files, 'packages/example/tsconfig.json', own);
+
+    expect(getFile(transition(files).files, 'packages/example/tsconfig.json') ?? own).toBe(own);
+  });
+
+  it("doesn't add the TypeScript 7 alias to a TypeScript 5 root", () => {
+    const files = createRepository();
+    editJson(files, 'package.json', (manifest) => {
+      const devDependencies = manifest.devDependencies as Record<string, string>;
+      devDependencies.typescript = '~5.9.3';
+      delete devDependencies.typescript7;
+    });
+
+    const creation = transition(files);
+
+    expect(getFile(creation.files, 'package.json')).not.toContain('"typescript7"');
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('older than 6'));
+  });
+
+  it('keeps an existing changesets config and only adds the changelog it uses', () => {
+    const files = createRepository();
+    const config = '{ "changelog": "@changesets/cli/changelog", "access": "public" }\n';
+    setFile(files, '.changeset/config.json', config);
+    editJson(files, 'package.json', (manifest) => {
+      delete (manifest.devDependencies as Record<string, string>)['@changesets/changelog-github'];
+    });
+
+    const output = transition(files).files;
+
+    expect(getFile(output, '.changeset/config.json')).not.toContain('privatePackages');
+    expect(getFile(output, 'package.json')).not.toContain('@changesets/changelog-github');
+  });
+
+  it('formats with Biome in a repository that uses it', () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['oxfmt.config.ts'];
+    setFile(files, 'biome.json', '{}\n');
+    editJson(files, 'package.json', (manifest) => {
+      const devDependencies = manifest.devDependencies as Record<string, string>;
+      delete devDependencies.oxfmt;
+      devDependencies['@biomejs/biome'] = '^2.0.0';
+    });
+
+    const creation = transition(files);
+
+    expect(prepare(files).formatter).toBe('biome');
+    expect(getFile(creation.files, 'oxfmt.config.ts')).toBeUndefined();
+    expect(getFile(creation.files, 'eslint.config.ts')).not.toContain('sort-named-imports');
+    expect(JSON.stringify(creation.scripts)).toContain('biome check --write');
+  });
+
+  it("checks root config files as ESM where the root isn't a module", () => {
+    const files = createRepository();
+    editJson(files, 'package.json', (manifest) => {
+      delete manifest.type;
+    });
+
+    expect(getFile(transition(files).files, 'tsconfig.json')).toContain('"module": "preserve"');
+  });
+
+  it("doesn't set up ESLint for ESLint 8", () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['eslint.config.ts'];
+    editJson(files, 'package.json', (manifest) => {
+      (manifest.devDependencies as Record<string, string>).eslint = '^8.57.1';
+    });
+
+    const creation = transition(files);
+
+    expect(getFile(creation.files, 'eslint.config.ts')).toBeUndefined();
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('ESLint ^8.57.1'));
+  });
+
+  it('turns off package.json rules for fields existing packages lack', () => {
+    const files = createRepository();
+    editJson(files, 'packages/example/package.json', (manifest) => {
+      delete manifest.sideEffects;
+    });
+
+    const config = getFile(transition(files).files, 'eslint.config.ts');
+
+    expect(config).toContain("'package-json/require-sideEffects': 'off'");
+    expect(config).not.toContain("'package-json/require-type': 'off'");
+  });
+
+  it('keeps sorted root scripts sorted when adding to them', () => {
+    const files = createRepository();
+    editJson(files, 'package.json', (manifest) => {
+      manifest.scripts = { build: 'tsdown', test: 'vitest' };
+    });
+
+    const scripts = Object.keys(
+      (
+        JSON.parse(getFile(transition(files).files, 'package.json') ?? '{}') as {
+          scripts: Record<string, string>;
+        }
+      ).scripts,
+    );
+
+    expect(scripts).toEqual([...scripts].sort((a, b) => a.localeCompare(b)));
+  });
+
+  it("doesn't give a new package a sibling tsdown older than the build base needs", () => {
+    const files = createRepository();
+    editJson(files, 'packages/example/package.json', (manifest) => {
+      (manifest.devDependencies as Record<string, string>).tsdown = '^0.15.0';
+    });
+
+    const creation = transition(files, { newPackage: 'second' });
+
+    expect(getFile(creation.files, 'packages/second/package.json')).not.toContain('"tsdown"');
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('packages/example'));
+  });
+
+  it("doesn't repeat nx project.json targets as scripts", () => {
+    const files = createRepository({ taskRunner: 'nx' });
+    setFile(files, 'packages/example/project.json', '{ "targets": { "build": {}, "test": {} } }\n');
+    editJson(files, 'packages/example/package.json', (manifest) => {
+      delete manifest.scripts;
+    });
+
+    expect(getFile(transition(files).files, 'packages/example/package.json')).not.toContain(
+      '"scripts"',
+    );
+  });
+
+  it('suggests listing parents of packages deep globs match', () => {
+    const files = createRepository();
+    setFile(files, 'pnpm-workspace.yaml', "packages:\n  - 'packages/**'\n");
+
+    expect(transition(files).suggestions).toContainEqual(expect.stringContaining('packages/**'));
+  });
+});
+
 describe('round 14 regressions', () => {
   const editRoot = (files: IntakeDirectory, edit: (manifest: Record<string, unknown>) => void) => {
     const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as Record<string, unknown>;

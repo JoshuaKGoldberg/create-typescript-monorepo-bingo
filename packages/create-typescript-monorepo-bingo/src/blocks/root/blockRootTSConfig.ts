@@ -20,8 +20,13 @@ export const blockRootTSConfig = rootBase.createBlock({
   },
   intake({ files }) {
     const existing = readText(files, 'tsconfig.json');
+    const rootType = parseJsonText(readText(files, 'package.json')).type;
     return {
       ...(existing !== undefined && { existing }),
+      // Without "type": "module", NodeNext treats root config files as CommonJS, where
+      // import.meta, as in CTM's vitest.config.ts, isn't allowed.
+      ...(readText(files, 'package.json') !== undefined &&
+        rootType !== 'module' && { rootNotModule: true }),
       ...(readText(files, 'packages/build/package.json') !== undefined && {
         hasBuildPackage: true,
       }),
@@ -32,8 +37,19 @@ export const blockRootTSConfig = rootBase.createBlock({
     hasBuildPackage: z.boolean().optional(),
     include: z.array(z.string()).optional(),
     references: z.array(z.string()).optional(),
+    rootNotModule: z.boolean().optional(),
   },
   produce({ options, props }) {
+    // Packages that extend the root tsconfig.json would inherit what CTM adds to it, like
+    // noEmit and include, so it's left as it is.
+    if (options.rootTSConfigExtended) {
+      return {
+        suggestions: [
+          "Packages extend the root tsconfig.json, so CTM left it as it is and didn't add a tsc -b typecheck. Move the shared settings to a base config, like tsconfig.base.json, for CTM to manage the root tsconfig.json's project references and type checking of root config files.",
+        ],
+      };
+    }
+
     const existing = parseJsonText(props.existing);
     const existingReferences = (existing.references as TSConfigReference[] | undefined) ?? [];
     const references = existingReferences.map((reference) => reference.path);
@@ -105,6 +121,7 @@ export const blockRootTSConfig = rootBase.createBlock({
                       target: 'ES2022',
                       types: ['node'],
                     }),
+                  ...(props.rootNotModule && { module: 'preserve', moduleResolution: 'bundler' }),
                   noEmit: true,
                   tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.json',
                 },

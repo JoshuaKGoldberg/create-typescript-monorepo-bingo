@@ -69,23 +69,26 @@ export const blockChangesets = rootBase.createBlock({
     }
 
     const app = options.releaseApp ?? defaults.releaseApp;
-    const existing = parseJsonText(props.existingConfig);
-    const config = {
-      $schema: 'https://unpkg.com/@changesets/config@4.0.0/schema.json',
-      changelog: [
-        '@changesets/changelog-github',
-        { repo: `${options.owner}/${options.repository}` },
-      ],
-      commit: false,
-      fixed: props.fixed ?? [],
-      linked: [],
-      access: 'public',
-      baseBranch: 'main',
-      updateInternalDependencies: 'patch',
-      ignore: [],
-      privatePackages: false,
-      ...existing,
-    };
+    // An existing config is the repository's, including settings CTM would choose
+    // differently, like privatePackages, which decides whether private packages get versions.
+    const config =
+      props.existingConfig === undefined
+        ? {
+            $schema: 'https://unpkg.com/@changesets/config@4.0.0/schema.json',
+            changelog: [
+              '@changesets/changelog-github',
+              { repo: `${options.owner}/${options.repository}` },
+            ],
+            commit: false,
+            fixed: props.fixed ?? [],
+            linked: [],
+            access: 'public',
+            baseBranch: 'main',
+            updateInternalDependencies: 'patch',
+            ignore: [],
+            privatePackages: false,
+          }
+        : parseJsonText(props.existingConfig);
 
     const appToken = (permissions: Record<string, string>) => ({
       name: 'Create Token',
@@ -220,7 +223,13 @@ export const blockChangesets = rootBase.createBlock({
           words: ['marcalexiei', ...app.split('_').filter((word) => /^[A-Z]+$/.test(word))],
         }),
         blockRootPackageJson({
-          devDependencies: pinned('@changesets/changelog-github', '@changesets/cli'),
+          // The GitHub changelog only where the config uses it, or Knip reports it unused.
+          devDependencies: pinned(
+            ...(JSON.stringify(config.changelog ?? null).includes('@changesets/changelog-github')
+              ? (['@changesets/changelog-github'] as const)
+              : []),
+            '@changesets/cli',
+          ),
         }),
       ],
       files: {

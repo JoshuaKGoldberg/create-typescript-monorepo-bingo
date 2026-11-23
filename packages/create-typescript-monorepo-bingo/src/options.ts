@@ -19,6 +19,11 @@ export const packageSpecSchema = z.object({
   isolatedDeclarations: z.boolean().optional(),
   kind: z.enum(packageKinds),
   name: z.string(),
+
+  /**
+   * Targets the package's nx project.json defines, which scripts needn't repeat.
+   */
+  nxTargets: z.array(z.string()).optional(),
   scripts: z.array(z.string()).optional(),
 
   /**
@@ -26,6 +31,11 @@ export const packageSpecSchema = z.object({
    */
   toolDevDependencies: z.record(z.string(), z.string()).optional(),
   tsdownWorkspaceReady: z.boolean().optional(),
+
+  /**
+   * Whether an existing package's tsconfig extends the build package's base.
+   */
+  extendsBuildTSConfig: z.boolean().optional(),
 
   /**
    * Whether an existing package uses the build package's tsconfig or tsdown base.
@@ -77,9 +87,11 @@ export const rootOptionsShape = {
   description: z.string().describe('sentence-case description of the repository'),
   directory: z.string().optional().describe('directory to create the repository in'),
   email: z.string().optional().describe('author email for package.json files'),
-  formatter: literalUnion(['oxfmt', 'prettier'] as const)
+  formatter: literalUnion(['oxfmt', 'prettier', 'biome'] as const)
     .optional()
-    .describe("formatter: 'oxfmt', or 'prettier' for repositories that already use it"),
+    .describe(
+      "formatter: 'oxfmt', or 'prettier' or 'biome' for repositories that already use them",
+    ),
   newPackage: z
     .string()
     .optional()
@@ -102,6 +114,10 @@ export const rootOptionsShape = {
   taskRunner: literalUnion(taskRunners)
     .optional()
     .describe("task runner to orchestrate scripts: 'none', 'pnpm', 'turbo', or 'nx'"),
+  rootTSConfigExtended: z
+    .boolean()
+    .optional()
+    .describe("inferred: packages extend the root tsconfig.json, so it's left as it is"),
   recursiveBuild: z
     .boolean()
     .optional()

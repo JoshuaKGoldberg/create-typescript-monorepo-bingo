@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
-import { findAlternateConfig, readText, withoutAlternate } from '../../utils/files.ts';
+import {
+  findAlternateConfig,
+  parseJsonText,
+  readText,
+  withoutAlternate,
+} from '../../utils/files.ts';
 import { mergeList } from '../../utils/lists.ts';
 import { getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
@@ -34,15 +39,25 @@ export const blockOxfmt = rootBase.createBlock({
       ...(alternate && { alternate }),
       ...(existing !== undefined && { existing }),
       ...(readText(files, '.prettierignore') !== undefined && { hasPrettierIgnore: true }),
+      // Node.js loads oxfmt.config.ts as CommonJS there, where its import statements fail.
+      ...(parseJsonText(readText(files, 'package.json')).type === 'commonjs' && {
+        rootCommonJS: true,
+      }),
     };
   },
   props: {
     alternate: z.string().optional(),
     existing: z.string().optional(),
     hasPrettierIgnore: z.boolean().optional(),
+    rootCommonJS: z.boolean().optional(),
     ignorePatterns: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
+    // Biome formats with its own config and checks, which the repository already runs.
+    if (options.formatter === 'biome') {
+      return {};
+    }
+
     if (options.formatter === 'prettier') {
       return {
         extensions: [
@@ -98,6 +113,11 @@ export const blockOxfmt = rootBase.createBlock({
     );
 
     return withoutAlternate(props.alternate, 'oxfmt.config.ts', {
+      suggestions: props.rootCommonJS
+        ? [
+            'The root package.json has "type": "commonjs", so Node.js can\'t load oxfmt.config.ts. Remove it, or set "type": "module", for Oxfmt to read its config.',
+          ]
+        : [],
       extensions: [
         blockGitHubActionsCI({
           jobs: [

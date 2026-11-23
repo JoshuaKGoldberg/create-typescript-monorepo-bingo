@@ -106,10 +106,23 @@ export const blockPnpmWorkspace = rootBase.createBlock({
         : document.toString({ flowCollectionPadding: false, singleQuote: true });
 
     return {
-      suggestions: (options.catalogExcluded ?? []).map(
-        (excluded) =>
-          `${excluded.replace(':', ' catalog: ')} has different versions across packages, so it's left out of catalogs. Align them to catalog it.`,
-      ),
+      suggestions: [
+        ...(options.catalogExcluded ?? []).map(
+          (excluded) =>
+            `${excluded.replace(':', ' catalog: ')} has different versions across packages, so it's left out of catalogs. Align them to catalog it.`,
+        ),
+        // CTM reads single-level globs, like packages/*, and exact directories.
+        ...existingGlobs
+          .filter(
+            (glob) =>
+              !glob.startsWith('!') &&
+              glob.replace(/^\.\//, '').replace(/\/$/, '').replace(/\/\*$/, '').includes('*'),
+          )
+          .map(
+            (glob) =>
+              `CTM only manages packages matched by single-level globs, like packages/*, so packages matched by ${glob} are left alone. List their parent directories with /* to have CTM manage them.`,
+          ),
+      ],
       files: {
         'pnpm-workspace.yaml': text,
       },

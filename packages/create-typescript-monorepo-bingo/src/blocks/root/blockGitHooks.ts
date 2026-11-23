@@ -38,7 +38,9 @@ export const blockGitHooks = rootBase.createBlock({
     const formatCommand =
       options.formatter === 'prettier'
         ? 'prettier --ignore-unknown --write'
-        : 'oxfmt --no-error-on-unmatched-pattern';
+        : options.formatter === 'biome'
+          ? 'biome check --write --no-errors-on-unmatched --files-ignore-unknown=true'
+          : 'oxfmt --no-error-on-unmatched-pattern';
 
     return {
       extensions: [

@@ -128,6 +128,21 @@ export function sortKeys<T>(value: Record<string, T>): Record<string, T> {
 }
 
 /**
+ * Sorts merged keys when the existing object's keys were already sorted, as lint rules
+ * like package-json/sort-collections expect; otherwise keeps the merged order.
+ */
+export function keepSorted<T>(
+  existing: Record<string, unknown> | undefined,
+  merged: Record<string, T>,
+): Record<string, T> {
+  const keys = Object.keys(existing ?? {});
+  const sorted =
+    keys.length > 1 &&
+    keys.every((key, index) => index === 0 || (keys[index - 1] ?? '').localeCompare(key) <= 0);
+  return sorted ? sortKeys(merged) : merged;
+}
+
+/**
  * Creates an object with an existing object's keys first, in their order,
  * followed by any default keys the existing object doesn't have.
  */

@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import type { TemplatePrepareContext } from 'bingo';
 import type { CreatedDirectory, IntakeDirectory } from 'bingo-fs';
 import { parse as parseYaml } from 'yaml';
@@ -94,6 +96,7 @@ export function prepareRoot(
     ...(buildsLibrariesRecursively(rootManifest?.scripts?.build, packages) && {
       recursiveBuild: true,
     }),
+    ...(workspacePackages.some(extendsRootTSConfig) && { rootTSConfigExtended: true }),
     ...inferTitle(files),
     ...inferTypeScript7Alias(rootManifest, workspace),
     ...inferFormatter(files, rootManifest),
@@ -232,10 +235,13 @@ function createPackageSpec(pkg: WorkspacePackage, all: WorkspacePackage[]): Pack
       tsdownWorkspaceReady: false,
     }),
     kind: inferPackageKind(pkg),
-    ...(usesBuildPackage(tsconfig, readText(pkg.files, 'tsdown.config.ts')) && {
+    ...(extendsBuildTSConfig(tsconfig) && { extendsBuildTSConfig: true }),
+    ...((extendsBuildTSConfig(tsconfig) ||
+      /['"][^'"]*\/build(?:\/tsdown)?['"]/.test(readText(pkg.files, 'tsdown.config.ts') ?? '')) && {
       usesBuildPackage: true,
     }),
     name: pkg.manifest.name ?? pkg.directory.split('/').pop() ?? pkg.directory,
+    ...getNxTargets(pkg),
     ...(pkg.manifest.scripts && { scripts: Object.keys(pkg.manifest.scripts) }),
     ...getToolDevDependencies(pkg.manifest),
     ...(workspaceDependencies.length && { workspaceDependencies }),
@@ -243,24 +249,29 @@ function createPackageSpec(pkg: WorkspacePackage, all: WorkspacePackage[]): Pack
 }
 
 /**
- * Whether a package uses the build package: its tsconfig extends the shared base, or will
- * once CTM adds the missing extends, or its tsdown config imports the shared base.
+ * Whether a package's tsconfig extends the root tsconfig.json, which it then shares
+ * settings with, like include and noEmit.
  */
-function usesBuildPackage(
-  tsconfig: undefined | { extends?: unknown; files?: unknown; include?: unknown },
-  tsdownConfig: string | undefined,
-) {
-  const isSolution = [tsconfig?.files, tsconfig?.include].some(
-    (list) => Array.isArray(list) && !list.length,
-  );
-  const extended = [tsconfig?.extends].flat();
-  return (
-    (!!tsconfig &&
-      !isSolution &&
-      (tsconfig.extends === undefined ||
-        extended.some((base) => typeof base === 'string' && base.includes('/build/tsconfig')))) ||
-    /['"][^'"]*\/build(?:\/tsdown)?['"]/.test(tsdownConfig ?? '')
-  );
+function extendsRootTSConfig(pkg: WorkspacePackage) {
+  const tsconfig = readJson(pkg.files, 'tsconfig.json') as undefined | { extends?: unknown };
+  return [tsconfig?.extends]
+    .flat()
+    .some(
+      (base) =>
+        typeof base === 'string' &&
+        path.posix.normalize(path.posix.join(pkg.directory, base)).replace(/\.json$/, '') ===
+          'tsconfig',
+    );
+}
+
+/**
+ * Whether a package's tsconfig extends the build package's shared base, as CTM's do.
+ * Other tsconfigs are the repository's own, which CTM leaves alone.
+ */
+function extendsBuildTSConfig(tsconfig: undefined | { extends?: unknown }) {
+  return [tsconfig?.extends]
+    .flat()
+    .some((base) => typeof base === 'string' && base.includes('/build/tsconfig'));
 }
 
 function getAllDependencies(manifest: PackageManifest): Record<string, string> {
@@ -574,6 +585,13 @@ function assertMonorepoRoot(manifest: PackageManifest | undefined) {
   }
 }
 
+function getNxTargets(pkg: WorkspacePackage): Partial<PackageSpec> {
+  const project = readJson(pkg.files, 'project.json') as undefined | { targets?: unknown };
+  const targets =
+    project?.targets && typeof project.targets === 'object' ? Object.keys(project.targets) : [];
+  return targets.length ? { nxTargets: targets.sort() } : {};
+}
+
 function getToolDevDependencies(manifest: PackageManifest): Partial<PackageSpec> {
   const tools = Object.fromEntries(
     Object.entries(manifest.devDependencies ?? {}).filter(([name]) =>
@@ -624,7 +642,19 @@ function inferFormatter(
     !!record?.prettier ||
     prettierConfigs.some((name) => getEntry(files, name));
 
-  return usesPrettier && !usesOxfmt ? { formatter: 'prettier' } : {};
+  // Biome formats and sorts imports itself, so CTM formats its files with Biome instead.
+  const usesBiome =
+    '@biomejs/biome' in dependencies ||
+    !!getEntry(files, 'biome.json') ||
+    !!getEntry(files, 'biome.jsonc');
+
+  return usesOxfmt
+    ? {}
+    : usesBiome
+      ? { formatter: 'biome' }
+      : usesPrettier
+        ? { formatter: 'prettier' }
+        : {};
 }
 
 /**

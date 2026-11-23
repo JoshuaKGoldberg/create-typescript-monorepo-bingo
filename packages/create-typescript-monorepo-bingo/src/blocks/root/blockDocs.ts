@@ -192,13 +192,19 @@ pnpm build
 
 ## Formatting
 
-[Oxfmt](https://oxc.rs/docs/guide/usage/formatter) is used to format code.
+${
+  options.formatter === 'prettier'
+    ? '[Prettier](https://prettier.io)'
+    : options.formatter === 'biome'
+      ? '[Biome](https://biomejs.dev)'
+      : '[Oxfmt](https://oxc.rs/docs/guide/usage/formatter)'
+} is used to format code.
 It should be applied automatically when you save files in VS Code or make a Git commit.
 
 To manually reformat all files, you can run:
 
 \`\`\`shell
-pnpm format --write
+${options.formatter === 'biome' ? 'pnpm exec biome check --write .' : 'pnpm format --write'}
 \`\`\`
 
 ## Linting

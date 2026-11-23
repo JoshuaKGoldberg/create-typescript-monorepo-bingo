@@ -44,6 +44,15 @@ export const blockPackageTSConfig = packageBase.createBlock({
 
     const existing = parseJsonText(props.existing) as TSConfig & Record<string, unknown>;
 
+    // An existing tsconfig that doesn't extend the build package's base is the repository's
+    // own, with its own settings for rootDir, references and the rest: CTM leaves it alone.
+    const extendsBuild = [existing.extends]
+      .flat()
+      .some((base) => typeof base === 'string' && base.includes('/build/tsconfig'));
+    if (props.existing !== undefined && !extendsBuild) {
+      return {};
+    }
+
     // A solution-style tsconfig, with no files of its own, is the package's own layout.
     if (
       (Array.isArray(existing.include) && !existing.include.length) ||
@@ -52,9 +61,15 @@ export const blockPackageTSConfig = packageBase.createBlock({
       return {};
     }
 
+    // Referenced packages must be composite, as tsconfigs extending the build base are,
+    // including new packages'.
     const libraries = new Map(
       (options.packages ?? [])
-        .filter((other) => other.kind === 'library')
+        .filter(
+          (other) =>
+            other.kind === 'library' &&
+            (!!other.extendsBuildTSConfig || other.name === options.newPackage),
+        )
         .map((other) => [other.name, other]),
     );
     // A new package depends on the build package too, which tools like nx's TypeScript

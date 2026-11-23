@@ -6,7 +6,7 @@ import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
 import { type Dependencies, resolveDependencies } from '../../utils/catalogs.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
-import { formatPackageJson, sortKeys } from '../../utils/json.ts';
+import { formatPackageJson, keepSorted, sortKeys } from '../../utils/json.ts';
 import { getAuthor, getRepositoryUrl } from '../../utils/options.ts';
 import { blockPnpmWorkspace } from './blockPnpmWorkspace.ts';
 
@@ -126,7 +126,7 @@ function mergeScripts(
     merged[name] ??= command;
   }
 
-  return merged;
+  return keepSorted(existing, merged);
 }
 
 /**

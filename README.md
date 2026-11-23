@@ -90,6 +90,7 @@ Options are inferred from an existing repository's files, and prompted for in ne
 | `--catalogExcluded`       | `<catalog>:<dependency>` pairs to keep out of catalogs                             | inferred                               |
 | `--catalogShared`         | Dependencies to put in the default catalog                                         | inferred                               |
 | `--catalogs`              | `none`, `default` or `named`                                                       | `default` for new repos                |
+| `--formatter`             | `oxfmt`, or `prettier` or `biome` for repositories that already use them           | inferred, else `oxfmt`                 |
 | `--newPackage`            | Name of a package to add under `packages/`                                         |                                        |
 | `--newPackageDescription` | Description of the `--newPackage`                                                  |                                        |
 | `--node`                  | Node.js version for `.nvmrc` and CI                                                | `26.13.1`                              |
@@ -149,6 +150,12 @@ A transition adds what a repository is missing and leaves what it has:
 - New packages get `build` and `test` scripts; other per-package scripts a task runner runs, like `lint`, are left to add, since sibling packages' commands may not apply to a new one.
 - The weekly transitions workflow doesn't regenerate an `actions.lock` file; re-run `gh actions-lock` when a transition PR changes workflow pins.
 - `cspell.json` gets words for the owner, author, repository, scope, title and new package names CTM writes, but not for descriptions, which are your own prose: add any uncommon words in them.
+- In Biome repositories, CTM formats the files it writes with `biome check --write` and adds no formatter of its own; its ESLint config leaves import and export sorting to Biome.
+- A root TypeScript older than 6 is kept, without the TypeScript 7 alias, whose `tsc` would replace it; a suggestion says to update. Updating TypeScript 6 can step back a patch version, to the newest `@typescript/typescript6`.
+- With ESLint older than 9, CTM doesn't set up its ESLint config; a suggestion says to update.
+- A root `tsconfig.json` that packages extend is left as it is, without a `tsc -b` typecheck, since packages would inherit what CTM adds to it.
+- Oxfmt can't load `oxfmt.config.ts` in a root with `"type": "commonjs"`; a suggestion says so.
+- Package tsconfigs that don't extend the build package's base are the repository's own: CTM leaves them alone, and existing packages without one don't get one.
 - pnpm 12.0.0 or newer is needed.
 
 ## Development

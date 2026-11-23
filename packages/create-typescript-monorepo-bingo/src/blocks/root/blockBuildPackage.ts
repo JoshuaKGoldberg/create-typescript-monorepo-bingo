@@ -115,23 +115,27 @@ export const blockBuildPackage = rootBase.createBlock({
       .find((specifier) => specifier !== undefined);
     const rootScripts = (rootManifest.scripts ?? {}) as Partial<Record<string, string>>;
     const rootBuild = rootScripts.build;
+    const rootTypeScript = [rootManifest.devDependencies, rootManifest.dependencies]
+      .map((dependencies) => (dependencies as Record<string, string> | undefined)?.typescript)
+      .find((specifier) => specifier !== undefined);
     return {
       existing,
       // Knip counts the TypeScript 7 alias as used through a root script that runs tsc,
       // like CTM's typecheck, which a repository's own typecheck script replaces.
-      ...(rootScripts.typecheck !== undefined &&
-        !Object.values(rootScripts).some(
-          (script) => script && /(?:^|[\s;&|(])tsc(?:\s|$)/.test(script),
-        ) && {
-          rootLacksTsc: true,
-        }),
+      ...(Object.values(rootScripts).some(
+        (script) => script && /(?:^|[\s;&|(])tsc(?:\s|$)/.test(script),
+      ) && { rootRunsTsc: true }),
+      ...(rootScripts.typecheck !== undefined && { rootHasTypecheck: true }),
+      ...(rootTypeScript && { rootTypeScript }),
       ...(rootBuild !== undefined && { rootBuild }),
       ...(rootTsdownSpecifier && { rootTsdownSpecifier }),
     };
   },
   props: {
     rootBuild: z.string().optional(),
-    rootLacksTsc: z.boolean().optional(),
+    rootHasTypecheck: z.boolean().optional(),
+    rootRunsTsc: z.boolean().optional(),
+    rootTypeScript: z.string().optional(),
     rootTsdownSpecifier: z.string().optional(),
     existing: z
       .object({
@@ -165,6 +169,14 @@ export const blockBuildPackage = rootBase.createBlock({
       (pkg) => pkg.kind === 'library' && pkg.tsdownWorkspaceReady === false,
     );
     const workspaceReady = !unready.length;
+    const olderLibraryTsdown = (options.packages ?? [])
+      .filter((pkg) => {
+        const specifier = pkg.kind === 'library' ? pkg.toolDevDependencies?.tsdown : undefined;
+        const minimum =
+          specifier && semver.validRange(specifier) ? semver.minVersion(specifier) : undefined;
+        return !!minimum && semver.lt(minimum, pin('tsdown'));
+      })
+      .map((pkg) => pkg.directory);
     // A root tsdown config only helps when the root build runs tsdown: an existing build,
     // like nx run-many, or a task runner's, builds packages with their own configs.
     const writesRootTsdown =
@@ -222,16 +234,38 @@ export const blockBuildPackage = rootBase.createBlock({
     };
 
     const typescript7Alias = getTypeScript7Alias(options);
+    // TypeScript 7's alias would take over the tsc bin from a root TypeScript older than 6,
+    // which, unlike TypeScript 6's, ships its own.
+    const rootTypeScriptMinimum =
+      props.rootTypeScript && semver.validRange(props.rootTypeScript)
+        ? semver.minVersion(props.rootTypeScript)
+        : undefined;
+    const addsTypeScript7 = !rootTypeScriptMinimum || rootTypeScriptMinimum.major >= 6;
+    // Knip only sees the alias used through a root script that runs tsc.
+    const typescript7Unseen =
+      addsTypeScript7 &&
+      !props.rootRunsTsc &&
+      (!!props.rootHasTypecheck || !!options.rootTSConfigExtended);
 
     return {
       suggestions: [
         ...(ownsBase ? [] : [describeUnownedFile('packages/build/src/tsdown/base.ts')]),
+        ...(addsTypeScript7
+          ? []
+          : [
+              `The root's TypeScript ${props.rootTypeScript ?? ''} is older than 6, so CTM didn't add TypeScript 7 as ${typescript7Alias}, whose tsc would replace it. Update to TypeScript 6 and re-run to type check with both.`,
+            ]),
         // An existing tsdown is kept, but packages' configs spread a base typed for CTM's.
         ...(props.rootTsdownSpecifier &&
         semver.validRange(props.rootTsdownSpecifier) &&
         semver.lt(semver.minVersion(props.rootTsdownSpecifier) ?? pin('tsdown'), pin('tsdown'))
           ? [
               `The root's tsdown ${props.rootTsdownSpecifier} allows versions older than the ${pin('tsdown')} the build package's tsdown base is written for. Update it to ^${pin('tsdown')}, so packages build and typecheck with one tsdown.`,
+            ]
+          : []),
+        ...(olderLibraryTsdown.length
+          ? [
+              `These packages declare a tsdown older than the ${pin('tsdown')} the build package's tsdown base is written for: ${olderLibraryTsdown.join(', ')}. Update them to ^${pin('tsdown')}.`,
             ]
           : []),
         ...(workspaceReady
@@ -244,18 +278,21 @@ export const blockBuildPackage = rootBase.createBlock({
         blockGitHubActionsCI({
           jobs: [
             { id: 'build', name: 'Build', steps: [{ run: 'pnpm build' }] },
-            { id: 'type_check', name: 'Type Check', steps: [{ run: 'pnpm typecheck' }] },
+            // A root tsconfig.json that packages extend isn't one tsc -b can check from.
+            ...(options.rootTSConfigExtended
+              ? []
+              : [{ id: 'type_check', name: 'Type Check', steps: [{ run: 'pnpm typecheck' }] }]),
           ],
         }),
         blockGitignore({ ignores: ['dist/', 'lib/'] }),
-        ...(rootToolsIndirect || props.rootLacksTsc
+        ...(rootToolsIndirect || typescript7Unseen
           ? [
               blockKnip({
                 ignoreDependencies: [
                   ...(rootToolsIndirect
                     ? [...(ownsBase ? ['@arethetypeswrong/core', 'publint'] : []), 'tsdown']
                     : []),
-                  ...(props.rootLacksTsc ? [typescript7Alias] : []),
+                  ...(typescript7Unseen ? [typescript7Alias] : []),
                 ],
               }),
             ]
@@ -279,7 +316,7 @@ export const blockBuildPackage = rootBase.createBlock({
             ...(rootUsesBuildPackage && { [name]: 'workspace:^' }),
             tsdown: pin('tsdown'),
             typescript: typescriptSpecifier(),
-            [typescript7Alias]: typescript7Specifier(),
+            ...(addsTypeScript7 && { [typescript7Alias]: typescript7Specifier() }),
           },
           scripts: {
             // Without a task runner, a package tsdown's workspace mode would skip is built
@@ -289,7 +326,7 @@ export const blockBuildPackage = rootBase.createBlock({
                 ? 'tsdown'
                 : `pnpm --recursive ${getPackageFilters(options)} run build`,
             }),
-            typecheck: 'tsc -b',
+            ...(!options.rootTSConfigExtended && { typecheck: 'tsc -b' }),
           },
         }),
         // Existing repositories keep their own choice of whether to reference the build package.

@@ -277,7 +277,9 @@ function createFormatScripts(
   const formatter =
     options.formatter === 'prettier'
       ? 'prettier --ignore-unknown --write'
-      : 'oxfmt --no-error-on-unmatched-pattern';
+      : options.formatter === 'biome'
+        ? 'biome check --write --no-errors-on-unmatched --files-ignore-unknown=true'
+        : 'oxfmt --no-error-on-unmatched-pattern';
   // bingo runs commands without a shell, so paths are passed as plain arguments.
   const paths = files.filter((file) => !/\s/.test(file)).join(' ');
 
