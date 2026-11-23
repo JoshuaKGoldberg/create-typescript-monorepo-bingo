@@ -181,7 +181,7 @@ async function runScenario(scenario: Scenario): Promise<string[]> {
   const failures: string[] = [];
 
   // The CLI's setup mode creates the directory itself, and refuses existing ones.
-  const [firstStep] = scenario.steps;
+  const firstStep = scenario.steps.at(0);
   if (!firstStep || !('cli' in firstStep)) {
     await fs.mkdir(directory, { recursive: true });
   }
