@@ -53,6 +53,14 @@ export const blockOxfmt = rootBase.createBlock({
     ignorePatterns: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
+    if (options.formatter === 'none') {
+      return {
+        suggestions: [
+          "CTM didn't find a formatter it knows, so it didn't add one: a new one would restyle existing files. To adopt Oxfmt, re-run with --formatter oxfmt, then run `pnpm format` once.",
+        ],
+      };
+    }
+
     // Biome formats with its own config and checks, which the repository already runs.
     if (options.formatter === 'biome') {
       return {};

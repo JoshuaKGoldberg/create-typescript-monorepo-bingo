@@ -89,6 +89,21 @@ export const blockGitignore = rootBase.createBlock({
       lines.push(ignore);
     }
 
+    // An existing entry, like build/, may hide the directories of packages CTM creates.
+    const hidden: string[] = [];
+    for (const pkg of options.packages ?? []) {
+      const isHidden = () =>
+        ignoreMatcher().add(lines.join('\n')).ignores(`${pkg.directory}/package.json`);
+      if ((pkg.kind === 'build' || pkg.name === options.newPackage) && isHidden()) {
+        lines.push(`!${pkg.directory}/`);
+        // A negation can't reach into an ignored parent directory.
+        if (isHidden()) {
+          lines.pop();
+          hidden.push(pkg.directory);
+        }
+      }
+    }
+
     // A fresh file is kept sorted; an existing one only gets appended to.
     const output = props.existing === undefined ? lines.sort() : lines;
 
@@ -98,10 +113,16 @@ export const blockGitignore = rootBase.createBlock({
         // Written back exactly as it was when nothing is added.
         '.gitignore': text.trimEnd() === props.existing?.trimEnd() ? props.existing : text,
       },
-      suggestions: skipped.map(
-        (ignore) =>
-          `${ignore} wasn't added to .gitignore, because package directories with that name hold files in this repository. Ignore build outputs another way.`,
-      ),
+      suggestions: [
+        ...skipped.map(
+          (ignore) =>
+            `${ignore} wasn't added to .gitignore, because package directories with that name hold files in this repository. Ignore build outputs another way.`,
+        ),
+        ...hidden.map(
+          (directory) =>
+            `.gitignore ignores ${directory}, so its files won't be committed. Change the entry that does.`,
+        ),
+      ],
     };
   },
 });

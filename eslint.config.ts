@@ -91,7 +91,7 @@ export default defineConfig(
   // Test only rules
   {
     extends: [vitest.configs.recommended],
-    files: ['**/*.test.*'],
+    files: ['**/*.test.{js,ts}'],
     rules: {
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-class-instance-assignment': 'off',

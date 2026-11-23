@@ -104,10 +104,7 @@ export const blockPackageJson = packageBase.createBlock({
     const test =
       options.testRunner === 'other' || options.vitestConfigUnowned
         ? undefined
-        : // Packages that run Vitest themselves do so with Vitest's defaults.
-          options.packagesRunVitest
-          ? 'vitest run'
-          : `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${project}`;
+        : `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${project}`;
     // Targets a package's nx project.json defines aren't repeated as scripts.
     const targets = new Set(pkg.nxTargets);
     const merged = buildsPerPackage(options)

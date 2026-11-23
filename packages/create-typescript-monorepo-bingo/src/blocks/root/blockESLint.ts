@@ -14,6 +14,7 @@ import {
   readText,
   withoutAlternate,
 } from '../../utils/files.ts';
+import { hasSameKeyOrder, hasSortedKeys } from '../../utils/json.ts';
 import { mergeList } from '../../utils/lists.ts';
 import { getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
@@ -77,12 +78,11 @@ export const blockESLint = rootBase.createBlock({
       // Without Vitest, CTM's own Vitest entry and import are dropped, but only as CTM wrote
       // them: a repository's own entry for test files, like one for Jest, stays.
       {
-        configs: vitest ? [] : [vitestConfigEntry],
+        configs: [previousVitestConfigEntry, ...(vitest ? [] : [vitestConfigEntry])],
         imports: vitest ? [] : [vitestImport],
         namePrefix: ownEntryPrefix,
       },
     );
-    const rootScripts = rootManifest.scripts as Record<string, string> | undefined;
     return {
       ...(alternate && { alternate }),
       // A repository adopting ESLint, which may not meet CTM's strict rules yet.
@@ -90,7 +90,6 @@ export const blockESLint = rootBase.createBlock({
         !alternate &&
         !legacy &&
         Object.keys(files).length > 0 && { adopting: true }),
-      ...(rootScripts?.lint !== undefined && { rootLint: true }),
       ...(packageJsonRulesOff.length && { packageJsonRulesOff }),
       ...(eslintMinimum && eslintMinimum.major < 9 && { oldESLint: eslintSpecifier }),
       ...(existingIgnores && { existingIgnores }),
@@ -106,7 +105,6 @@ export const blockESLint = rootBase.createBlock({
     legacy: z.string().optional(),
     adopting: z.boolean().optional(),
     oldESLint: z.string().optional(),
-    rootLint: z.boolean().optional(),
     packageJsonRulesOff: z.array(z.string()).optional(),
     unowned: z.boolean().optional(),
     unparseable: z.boolean().optional(),
@@ -133,18 +131,8 @@ export const blockESLint = rootBase.createBlock({
     lintPrebuildSteps: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
-    // A repository's own ESLint setup still gets a CI job for its lint script.
-    const repositoryLint = props.rootLint
-      ? [
-          blockGitHubActionsCI({
-            jobs: [{ id: 'lint', name: 'Lint', steps: [{ run: 'pnpm lint' }] }],
-          }),
-        ]
-      : [];
-
     if (props.oldESLint) {
       return {
-        extensions: repositoryLint,
         suggestions: [
           `This repository uses ESLint ${props.oldESLint}, so CTM didn't set up its ESLint config, which needs ESLint 9 or newer. Update ESLint and re-run to add it.`,
         ],
@@ -153,7 +141,6 @@ export const blockESLint = rootBase.createBlock({
 
     if (props.unowned) {
       return {
-        extensions: repositoryLint,
         suggestions: [describeUnownedFile('eslint.config.ts')],
       };
     }
@@ -175,13 +162,9 @@ export const blockESLint = rootBase.createBlock({
         ? insertIgnores(existingIgnores, added)
         : `\n${added.map((ignore) => `      ${ignore},`).join('\n')}\n    `;
     const workflowExtension = options.workflowExtension ?? defaults.workflowExtension;
-    // Packages whose exports point at build output have no types until they're built.
-    const prebuildSteps: WorkflowStep[] = [
-      ...(options.packagesExportBuildOutput ? ['pnpm build'] : []),
-      ...(props.lintPrebuildSteps ?? []),
-    ].map((run) => ({ run }));
+    const prebuildSteps: WorkflowStep[] = (props.lintPrebuildSteps ?? []).map((run) => ({ run }));
 
-    const creation = withoutAlternate(props.alternate, 'eslint.config.ts', {
+    return withoutAlternate(props.alternate, 'eslint.config.ts', {
       suggestions: [
         ...(props.adopting
           ? [
@@ -259,9 +242,6 @@ export const blockESLint = rootBase.createBlock({
         }),
       },
     });
-
-    // With its own config, like eslint.config.js, the repository's lint script still runs.
-    return props.alternate ? { ...creation, extensions: repositoryLint } : creation;
   },
 });
 
@@ -274,6 +254,20 @@ const ownEntryPrefix = 'create-typescript-monorepo-bingo/';
 const vitestImport = "import vitest from '@vitest/eslint-plugin';";
 
 const vitestConfigEntry = `{
+    extends: [vitest.configs.recommended],
+    files: ['**/*.test.{js,ts}'],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-class-instance-assignment': 'off',
+      'vitest/no-conditional-expect': 'off',
+    },
+    settings: { vitest: { typecheck: true } },
+  }`;
+
+/**
+ * The entry as CTM wrote it before, which is replaced rather than kept as a repository's.
+ */
+const previousVitestConfigEntry = `{
     extends: [vitest.configs.recommended],
     files: ['**/*.test.*'],
     rules: {
@@ -488,6 +482,15 @@ const requiredFields: [
 ];
 
 /**
+ * Collections package-json/sort-collections checks, apart from dependencies, which CTM sorts.
+ */
+const sortedCollections = ['config', 'exports', 'overrides', 'peerDependenciesMeta', 'scripts'];
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
  * Finds the required package.json fields existing packages lack and CTM doesn't fill in,
  * like a library's sideEffects, whose rules would otherwise fail on adoption. CTM fills in
  * the root's description and repository, and its libraries' names and repositories.
@@ -504,16 +507,15 @@ function findMissingPackageFields(files: IntakeDirectory, options: RootOptions):
     return text === undefined ? [] : [{ filled, manifest: parseJsonText(text) }];
   });
 
-  const sameKeys = (a: object | undefined, b: object | undefined) =>
-    JSON.stringify(Object.keys(a ?? {})) === JSON.stringify(Object.keys(b ?? {}));
-  // CTM keeps an existing manifest's key and script order, which these rules check.
-  const unsorted = manifests.some(({ manifest }) => {
-    const sorted = sortPackageJson(manifest);
-    return (
-      !sameKeys(manifest, sorted) ||
-      !sameKeys(manifest.scripts as object | undefined, sorted.scripts as object | undefined)
-    );
-  });
+  // CTM keeps unsorted keys in the order they were, which these rules check.
+  const unsortedKeys = manifests.some(({ manifest }) => !hasSortedKeys(manifest));
+  const unsortedCollections = manifests.some(({ manifest }) =>
+    sortedCollections.some(
+      (name) =>
+        isPlainObject(manifest[name]) &&
+        !hasSameKeyOrder(manifest[name], sortPackageJson({ [name]: manifest[name] })[name]),
+    ),
+  );
 
   return [
     ...requiredFields
@@ -526,6 +528,7 @@ function findMissingPackageFields(files: IntakeDirectory, options: RootOptions):
         ),
       )
       .map(([rule]) => rule),
-    ...(unsorted ? ['order-properties', 'sort-collections'] : []),
+    ...(unsortedKeys ? ['order-properties'] : []),
+    ...(unsortedCollections ? ['sort-collections'] : []),
   ];
 }

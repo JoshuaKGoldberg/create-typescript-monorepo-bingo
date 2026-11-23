@@ -128,6 +128,9 @@ export const blockBuildPackage = rootBase.createBlock({
         (script) => script && /(?:^|[\s;&|(])tsc(?:\s|$)/.test(script),
       ) && { rootRunsTsc: true }),
       ...(rootScripts.typecheck !== undefined && { rootHasTypecheck: true }),
+      // A typecheck of its own may need steps CTM's job doesn't have, like a build.
+      ...(rootScripts.typecheck !== undefined &&
+        rootScripts.typecheck !== 'tsc -b' && { ownTypecheck: true }),
       ...(rootTypeScript && { rootTypeScript }),
       ...(rootTypeScript && {
         rootTypeScriptMajor: getMinimumVersion('typescript', rootTypeScript, workspaceText)?.major,
@@ -151,6 +154,7 @@ export const blockBuildPackage = rootBase.createBlock({
   },
   props: {
     rootBuild: z.string().optional(),
+    ownTypecheck: z.boolean().optional(),
     rootHasTypecheck: z.boolean().optional(),
     rootRunsTsc: z.boolean().optional(),
     rootTypeScript: z.string().optional(),
@@ -299,7 +303,7 @@ export const blockBuildPackage = rootBase.createBlock({
           jobs: [
             { id: 'build', name: 'Build', steps: [{ run: 'pnpm build' }] },
             // A root tsconfig.json that packages extend isn't one tsc -b can check from.
-            ...(options.rootTSConfigExtended
+            ...(options.rootTSConfigExtended || props.ownTypecheck
               ? []
               : [{ id: 'type_check', name: 'Type Check', steps: [{ run: 'pnpm typecheck' }] }]),
           ],

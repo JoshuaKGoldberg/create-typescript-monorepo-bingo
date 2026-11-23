@@ -104,7 +104,7 @@ export const blockRootTSConfig = rootBase.createBlock({
       suggestions:
         props.rootNotModule &&
         setsModule &&
-        String(existingOptions.module).toLowerCase() !== 'preserve'
+        !/^(?:preserve|es|system)/i.test(String(existingOptions.module))
           ? [
               'The root package.json isn\'t "type": "module", so root config files that use import.meta, like vitest.config.ts, fail to type check with the root tsconfig.json\'s module setting. Set "module": "preserve" and "moduleResolution": "bundler" in it, or "type": "module" in package.json.',
             ]

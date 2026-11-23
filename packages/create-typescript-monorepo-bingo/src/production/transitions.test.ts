@@ -1228,7 +1228,7 @@ describe('round 11 regressions', () => {
       manifest.devDependencies = { ...manifest.devDependencies, vitest: '^5.0.0' };
     });
 
-    const config = getFile(transition(files).files, 'eslint.config.ts');
+    const config = getFile(transition(files, { testRunner: 'vitest' }).files, 'eslint.config.ts');
 
     expect(config).toContain(jestEntry);
     expect(config).toContain('vitest.configs.recommended');
@@ -1274,7 +1274,7 @@ describe('round 11 regressions', () => {
   });
 });
 
-describe('round 15 adoption regressions', () => {
+describe('round 16 regressions', () => {
   const editJson = (
     files: IntakeDirectory,
     path: string,
@@ -1286,29 +1286,134 @@ describe('round 15 adoption regressions', () => {
   };
   const prepare = (files: IntakeDirectory) =>
     prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never });
+  const withoutFormatter = () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['oxfmt.config.ts'];
+    editJson(files, 'package.json', (manifest) => {
+      delete (manifest.devDependencies as Record<string, string>).oxfmt;
+    });
+    return files;
+  };
 
-  it("doesn't add a root Vitest config packages running Vitest themselves would pick up", () => {
+  it('never formats files of a repository without a formatter CTM knows', () => {
+    const files = withoutFormatter();
+    const creation = transition(files);
+
+    expect(prepare(files).formatter).toBe('none');
+    expect(creation.scripts ?? []).not.toContainEqual(
+      expect.objectContaining({ commands: [expect.stringContaining('oxfmt')] }),
+    );
+    expect(getFile(creation.files, 'oxfmt.config.ts')).toBeUndefined();
+  });
+
+  it.each([
+    ['{ "json": { "formatter": { "enabled": false } } }', {}, 'biome'],
+    ['{ "formatter": { "enabled": false } }', {}, 'none'],
+    ['{}', { prettier: '^3.0.0' }, 'prettier'],
+  ])('infers the formatter with biome.json %s and %o', (biome, dependencies, expected) => {
+    const files = withoutFormatter();
+    setFile(files, 'biome.json', biome);
+    editJson(files, 'package.json', (manifest) => {
+      manifest.devDependencies = { ...(manifest.devDependencies as object), ...dependencies };
+    });
+
+    expect(prepare(files).formatter).toBe(expected);
+  });
+
+  it.each(['vitest run', 'jest'])('leaves existing package tests running %s alone', (test) => {
     const files = createRepository({ taskRunner: 'turbo' });
     delete (files as Record<string, unknown>)['vitest.config.ts'];
     editJson(files, 'packages/example/package.json', (manifest) => {
+      manifest.scripts = { test };
+    });
+    const creation = transition(files, { newPackage: 'second' });
+
+    expect(prepare(files).testRunner).toBe('other');
+    expect(getFile(creation.files, 'vitest.config.ts')).toBeUndefined();
+    expect(getFile(creation.files, 'packages/second/package.json')).not.toContain('vitest');
+    expect(getFile(creation.files, 'packages/second/src/greet.test.ts')).toBeUndefined();
+  });
+
+  it('leaves a root vitest run without a config alone', () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['vitest.config.ts'];
+    editJson(files, 'package.json', (manifest) => {
       (manifest.scripts as Record<string, string>).test = 'vitest run';
     });
 
-    const creation = transition(files, { newPackage: 'second' });
+    expect(prepare(files).testRunner).toBe('other');
+  });
 
-    expect(prepare(files).packagesRunVitest).toBe(true);
-    expect(getFile(creation.files, 'vitest.config.ts')).toBeUndefined();
-    expect(getFile(creation.files, 'packages/second/package.json')).toContain(
-      '"test": "vitest run"',
+  it('keeps packages/build out of an existing build/ ignore', () => {
+    const files = createRepository();
+    setFile(files, '.gitignore', 'node_modules\ndist\nlib\ncoverage\nbuild/\n');
+    applyFiles(files, transition(files).files);
+
+    expect(getFile(files, '.gitignore')).toContain('!packages/build/');
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it("doesn't change the order existing recursive tests run in", () => {
+    const files = createRepository();
+    editJson(files, 'package.json', (manifest) => {
+      (manifest.scripts as Record<string, string>).test = 'pnpm -r run test';
+    });
+
+    expect(getFile(transition(files).files, 'pnpm-workspace.yaml')).not.toContain('dependsOn');
+  });
+
+  it('replaces its earlier Vitest lint entry without keeping a copy', () => {
+    const files = createRepository();
+    setFile(
+      files,
+      'eslint.config.ts',
+      (getFile(files, 'eslint.config.ts') ?? '').replace('**/*.test.{js,ts}', '**/*.test.*'),
+    );
+    const config = getFile(transition(files).files, 'eslint.config.ts') ?? '';
+
+    expect(config.split('vitest.configs.recommended')).toHaveLength(2);
+    expect(config).toContain("files: ['**/*.test.{js,ts}']");
+  });
+
+  it('pins an @eslint/js that exists next to a newer ESLint', () => {
+    const files = createRepository();
+    editJson(files, 'package.json', (manifest) => {
+      const devDependencies = manifest.devDependencies as Record<string, string>;
+      devDependencies.eslint = '^10.99.0';
+      delete devDependencies['@eslint/js'];
+    });
+
+    expect(getFile(transition(files).files, 'package.json')).not.toContain(
+      '"@eslint/js": "^10.99.0"',
     );
   });
 
-  it('formats a repository adopting Oxfmt in full, once', () => {
+  it('keeps sorted top-level keys sorted, whatever order nested ones are in', () => {
     const files = createRepository();
-    delete (files as Record<string, unknown>)['oxfmt.config.ts'];
+    editJson(files, 'package.json', (manifest) => {
+      manifest.devDependencies = Object.fromEntries(
+        Object.entries(manifest.devDependencies as object).reverse(),
+      );
+      delete manifest.packageManager;
+      delete manifest.engines;
+    });
+    applyFiles(files, transition(files).files);
 
-    expect(JSON.stringify(transition(files).scripts)).toContain('"pnpm exec oxfmt"');
+    expect(getFile(files, 'eslint.config.ts')).not.toContain('order-properties');
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
   });
+});
+
+describe('round 15 adoption regressions', () => {
+  const editJson = (
+    files: IntakeDirectory,
+    path: string,
+    edit: (json: Record<string, unknown>) => void,
+  ) => {
+    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
+    edit(json);
+    setFile(files, path, JSON.stringify(json, null, 2));
+  };
 
   it('turns off package.json order rules for unsorted manifests', () => {
     const files = createRepository();
@@ -1318,22 +1423,8 @@ describe('round 15 adoption regressions', () => {
 
     const config = getFile(transition(files).files, 'eslint.config.ts');
 
-    expect(config).toContain("'package-json/order-properties': 'off'");
+    expect(config).not.toContain('order-properties');
     expect(config).toContain("'package-json/sort-collections': 'off'");
-  });
-
-  it('builds before linting when packages export build output', () => {
-    const files = createRepository();
-    editJson(files, 'packages/example/package.json', (manifest) => {
-      manifest.exports = { '.': './dist/index.mjs' };
-    });
-    // An existing Lint job is the repository's: this one is new.
-    delete ((files['.github'] as IntakeDirectory).workflows as Record<string, unknown>)['ci.yaml'];
-
-    expect(prepare(files).packagesExportBuildOutput).toBe(true);
-    expect(getFile(transition(files).files, '.github/workflows/ci.yaml')).toMatch(
-      /lint:[\s\S]*?pnpm build[\s\S]*?pnpm lint/,
-    );
   });
 
   it("builds a site's workspace dependencies first", () => {
@@ -1361,14 +1452,6 @@ describe('round 15 adoption regressions', () => {
     });
 
     expect(transition(files).suggestions).toContainEqual(expect.stringContaining('`tsc -b`'));
-  });
-
-  it("keeps a CI lint job for a repository's own ESLint config", () => {
-    const files = createRepository();
-    delete (files as Record<string, unknown>)['eslint.config.ts'];
-    setFile(files, 'eslint.config.js', 'export default [];\n');
-
-    expect(getFile(transition(files).files, '.github/workflows/ci.yaml')).toContain('pnpm lint');
   });
 });
 

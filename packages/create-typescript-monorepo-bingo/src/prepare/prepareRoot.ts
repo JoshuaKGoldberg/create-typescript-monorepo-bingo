@@ -6,7 +6,15 @@ import { parse as parseYaml } from 'yaml';
 
 import type { CatalogMode, PackageKind, PackageSpec, RootOptions, TaskRunner } from '../options.ts';
 import { type DependencyField, dependencyFields } from '../utils/catalogs.ts';
-import { getDirectory, getEntry, isOwnedFile, readJson, readText } from '../utils/files.ts';
+import {
+  findAlternateConfig,
+  getDirectory,
+  getEntry,
+  isOwnedFile,
+  parseJsonText,
+  readJson,
+  readText,
+} from '../utils/files.ts';
 import { pin, tryPin } from '../utils/pins.ts';
 import { isProtocolSpecifier, parseNpmAlias, resolveSpecifier } from '../utils/versions.ts';
 
@@ -104,17 +112,6 @@ export function prepareRoot(
     ...inferTypeScript7Alias(rootManifest, workspace),
     ...inferFormatter(files, rootManifest),
     ...inferVitestConfig(files),
-    // Packages importing each other through exports like ./dist/index.mjs need a build
-    // before their imports have types.
-    ...(workspacePackages.some((pkg) =>
-      /(?:^|["/])(?:dist|lib|build|out)\//.test(
-        JSON.stringify([pkg.manifest.exports, pkg.manifest.main, pkg.manifest.types]),
-      ),
-    ) &&
-      rootManifest?.scripts?.build !== undefined && { packagesExportBuildOutput: true }),
-    ...(inferVitestConfig(files).vitestConfig === undefined &&
-      readText(files, 'vitest.config.ts') === undefined &&
-      workspacePackages.some(runsVitestWithoutConfig) && { packagesRunVitest: true }),
     ...inferTestRunner(files, rootManifest, workspacePackages),
     ...inferWorkflowExtension(files),
   };
@@ -650,47 +647,41 @@ function inferFormatter(
 ): Partial<RootOptions> {
   const record = manifest as (PackageManifest & Record<string, unknown>) | undefined;
   const dependencies = { ...(record?.dependencies as object), ...manifest?.devDependencies };
-  const usesOxfmt = 'oxfmt' in dependencies || !!getEntry(files, 'oxfmt.config.ts');
+  const usesOxfmt =
+    'oxfmt' in dependencies ||
+    !!getEntry(files, 'oxfmt.config.ts') ||
+    !!findAlternateConfig(files, 'oxfmt');
   const usesPrettier =
     'prettier' in dependencies ||
     !!record?.prettier ||
     prettierConfigs.some((name) => getEntry(files, name));
 
-  // Biome formats and sorts imports itself, so CTM formats its files with Biome instead,
-  // unless Biome only lints, as alongside Prettier.
   const biomeConfig = readText(files, 'biome.json') ?? readText(files, 'biome.jsonc');
+  if (usesOxfmt) {
+    return {};
+  }
+
+  // Biome may only lint, alongside another formatter; its settings may also turn formatting
+  // off for some languages or paths, which doesn't count.
+  const biomeFormatter = parseJsonText(biomeConfig, 'biome.json').formatter as
+    | undefined
+    | { enabled?: boolean };
   const formatsWithBiome =
     ('@biomejs/biome' in dependencies || biomeConfig !== undefined) &&
-    !/"formatter"\s*:\s*\{[^}]*"enabled"\s*:\s*false/.test(biomeConfig ?? '');
+    biomeFormatter?.enabled !== false;
+  const scripts = Object.values(manifest?.scripts ?? {}).join('\n');
+  if (formatsWithBiome && (!usesPrettier || /\bbiome (?:check|ci|format)\b/.test(scripts))) {
+    return { formatter: 'biome' };
+  }
 
-  return usesOxfmt
-    ? {}
-    : usesPrettier
-      ? { formatter: 'prettier' }
-      : formatsWithBiome
-        ? { formatter: 'biome' }
-        : {};
+  // Styling CTM doesn't recognize, like dprint's or ESLint's, is left alone rather than
+  // reformatted, and so is a repository with none.
+  return { formatter: usesPrettier ? 'prettier' : 'none' };
 }
 
 /**
  * Infers the root Vitest config's file name, when it isn't vitest.config.ts.
  */
-
-/**
- * Whether a package runs Vitest itself, through a script or an nx project.json target,
- * without a config of its own: Vitest would then find and use a root config instead.
- */
-function runsVitestWithoutConfig(pkg: WorkspacePackage) {
-  const runs =
-    /\bvitest\b/.test(pkg.manifest.scripts?.test ?? '') ||
-    /\bvitest\b/.test(readText(pkg.files, 'project.json') ?? '');
-  const hasConfig = ['vitest', 'vite'].some((tool) =>
-    ['ts', 'mts', 'cts', 'js', 'mjs', 'cjs'].some((extension) =>
-      getEntry(pkg.files, `${tool}.config.${extension}`),
-    ),
-  );
-  return runs && !hasConfig;
-}
 
 function inferVitestConfig(files: IntakeDirectory): Partial<RootOptions> {
   const name = [
@@ -753,41 +744,50 @@ function inferTestRunner(
   manifest: PackageManifest | undefined,
   packages: WorkspacePackage[],
 ): Partial<RootOptions> {
-  const mentionsVitest = (candidate: PackageManifest | undefined) => {
-    // Scripts are indexed by name, so a test script may not exist.
-    const script: string | undefined = candidate?.scripts?.test;
-    return (
-      !!candidate && ('vitest' in getAllDependencies(candidate) || !!script?.includes('vitest'))
-    );
-  };
-
+  // A root test script of its own, like node --test, is another test runner, even if a
+  // Vitest config is left over.
   const test: string | undefined = manifest?.scripts?.test;
-  if (mentionsVitest(manifest)) {
-    return {};
-  }
-
-  // A root test script of its own, like node --test, is another test runner.
   const delegates = /\b(?:turbo|nx|lerna)\b/.test(test ?? '') || recursivePnpm.test(test ?? '');
-  if (test !== undefined && !delegates) {
+  if (
+    test !== undefined &&
+    !delegates &&
+    !test.includes('vitest') &&
+    !(manifest && 'vitest' in getAllDependencies(manifest))
+  ) {
     return { testRunner: 'other' };
   }
 
-  if (
-    packages.some((pkg) => mentionsVitest(pkg.manifest)) ||
-    getEntry(files, 'vitest.config.ts') ||
-    inferVitestConfig(files).vitestConfig
-  ) {
+  // A root Vitest config, CTM's or the repository's own, is what CTM's setup builds on.
+  if (getEntry(files, 'vitest.config.ts') || inferVitestConfig(files).vitestConfig) {
     return {};
   }
 
-  // Packages testing with something else, or a repository CTM already manages without
-  // Vitest anywhere, as `--testRunner other` leaves it.
+  // Without one, any existing tests run with settings a new root config would replace,
+  // like which files are tests, so they're left alone.
+  const hasTests = (candidate: PackageManifest | undefined) =>
+    !!candidate &&
+    ('vitest' in getAllDependencies(candidate) ||
+      Object.entries(candidate.scripts ?? {}).some(
+        ([name, script]) => /^test\b/.test(name) || /\bvitest\b/.test(script),
+      ));
+  if (
+    hasTests(manifest) ||
+    Object.keys(files).some((name) => name.startsWith('vitest.workspace.')) ||
+    packages.some(
+      (pkg) =>
+        hasTests(pkg.manifest) ||
+        Object.keys(pkg.files).some((name) => name.startsWith('vitest.config.')) ||
+        /"test"\s*:|\bvitest\b/.test(readText(pkg.files, 'project.json') ?? ''),
+    )
+  ) {
+    return { testRunner: 'other' };
+  }
+
+  // A repository CTM already manages without Vitest, as `--testRunner other` leaves it.
   // Only files that exist count: a missing one isn't a sign CTM manages the repository.
   const managed = ['eslint.config.ts', 'packages/build/src/tsdown/base.ts'].some((path) => {
     const text = readText(files, path);
     return text !== undefined && isOwnedFile(text);
   });
-  return packages.some((pkg) => pkg.manifest.scripts?.test) || managed
-    ? { testRunner: 'other' }
-    : {};
+  return managed ? { testRunner: 'other' } : {};
 }

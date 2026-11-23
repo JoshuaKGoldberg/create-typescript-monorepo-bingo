@@ -35,6 +35,11 @@ export const blockGitHooks = rootBase.createBlock({
       return {};
     }
 
+    // The hook only formats, so there's nothing for it to run.
+    if (options.formatter === 'none') {
+      return {};
+    }
+
     const formatCommand =
       options.formatter === 'prettier'
         ? 'prettier --ignore-unknown --write'

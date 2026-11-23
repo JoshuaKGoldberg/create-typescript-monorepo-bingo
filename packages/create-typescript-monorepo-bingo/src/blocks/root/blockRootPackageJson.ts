@@ -8,6 +8,8 @@ import { type Dependencies, resolveDependencies } from '../../utils/catalogs.ts'
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatPackageJson, keepSorted, sortKeys } from '../../utils/json.ts';
 import { getAuthor, getRepositoryUrl } from '../../utils/options.ts';
+import { pin } from '../../utils/pins.ts';
+import { getMinimumVersion } from '../../utils/versions.ts';
 import { blockPnpmWorkspace } from './blockPnpmWorkspace.ts';
 
 const dependenciesSchema = z.record(z.string(), z.string());
@@ -193,7 +195,14 @@ function alignCompanions(
       companion in aligned &&
       !(companion in existing) &&
       coreSpecifier &&
-      !coreSpecifier.startsWith('catalog:')
+      !coreSpecifier.startsWith('catalog:') &&
+      // @eslint/js isn't released with every ESLint version: within CTM's major, its own
+      // pin is one that exists.
+      !(
+        companion === '@eslint/js' &&
+        getMinimumVersion(core, coreSpecifier, workspaceText)?.major ===
+          semver.parse(pin('@eslint/js'))?.major
+      )
     ) {
       aligned[companion] = coreSpecifier;
     }

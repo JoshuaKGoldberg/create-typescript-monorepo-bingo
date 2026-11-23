@@ -108,16 +108,26 @@ export function formatPackageJson(value: Record<string, unknown>, existingText?:
   // their key order.
   const cleaned = removeUndefined(value);
   const existing: unknown = existingText === undefined ? undefined : parseJsonc(existingText);
-  const wasSorted =
-    existing !== undefined &&
-    isDeepStrictEqual(
-      JSON.stringify(sortPackageJson(existing as object)),
-      JSON.stringify(existing),
-    );
-  return formatJson(
-    existing === undefined || wasSorted ? sortPackageJson(cleaned) : cleaned,
-    existingText,
-  );
+  if (existing === undefined) {
+    return formatJson(sortPackageJson(cleaned), existingText);
+  }
+
+  // Only top-level keys are put in order: nested ones, like exports, may be in theirs on purpose.
+  const ordered = hasSortedKeys(existing as Record<string, unknown>)
+    ? Object.fromEntries(Object.keys(sortPackageJson(cleaned)).map((key) => [key, cleaned[key]]))
+    : cleaned;
+  return formatJson(ordered, existingText);
+}
+
+/**
+ * Whether a manifest's top-level keys are in the order eslint-plugin-package-json expects.
+ */
+export function hasSortedKeys(manifest: Record<string, unknown>): boolean {
+  return hasSameKeyOrder(manifest, sortPackageJson(manifest));
+}
+
+export function hasSameKeyOrder(a: object, b: object): boolean {
+  return JSON.stringify(Object.keys(a)) === JSON.stringify(Object.keys(b));
 }
 
 /**

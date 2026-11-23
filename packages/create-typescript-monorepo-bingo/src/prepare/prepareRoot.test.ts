@@ -74,10 +74,10 @@ describe(prepareRoot, () => {
       catalogs: 'named',
       description: 'A monorepo.',
       email: 'a@b.c',
+      formatter: 'none',
       node: '26.13.1',
       nodeEngines: '>=22',
       owner: 'my-org',
-      packagesRunVitest: true,
       packages: [
         {
           directory: 'packages/a',
@@ -101,6 +101,7 @@ describe(prepareRoot, () => {
       repository: 'my-repo',
       scope: '@my',
       taskRunner: 'none',
+      testRunner: 'other',
       title: 'My Repo',
       typescript7Alias: 'typescript7',
       workflowExtension: 'yml',

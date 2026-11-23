@@ -273,6 +273,10 @@ function createFormatScripts(
   creation: Partial<Creation>,
   existing: IntakeDirectory | undefined,
 ) {
+  if (options.formatter === 'none') {
+    return [];
+  }
+
   // Files CTM wrote back unchanged are the repository's, and keep their formatting.
   const files = listFiles(creation.files ?? {}).filter(
     (file) => readText(existing, file) !== readCreated(creation.files, file),
@@ -287,19 +291,6 @@ function createFormatScripts(
       : options.formatter === 'biome'
         ? 'biome check --write --no-errors-on-unmatched --files-ignore-unknown=true'
         : 'oxfmt --no-error-on-unmatched-pattern';
-  // A repository adopting Oxfmt, with no formatter before, is formatted once in full, as
-  // its new format check expects; after that, only the files CTM writes are.
-  if (
-    options.formatter === undefined || options.formatter === 'oxfmt'
-      ? existing !== undefined &&
-        Object.keys(existing).length > 0 &&
-        readText(existing, 'oxfmt.config.ts') === undefined &&
-        !Object.keys(existing).some((name) => name.startsWith('.oxfmtrc'))
-      : false
-  ) {
-    return [{ commands: ['pnpm exec oxfmt'], phase: 1 }];
-  }
-
   // bingo runs commands without a shell, so paths are passed as plain arguments.
   const paths = files.filter((file) => !/\s/.test(file)).join(' ');
 

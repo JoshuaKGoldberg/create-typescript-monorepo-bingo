@@ -90,7 +90,7 @@ Options are inferred from an existing repository's files, and prompted for in ne
 | `--catalogExcluded`       | `<catalog>:<dependency>` pairs to keep out of catalogs                             | inferred                               |
 | `--catalogShared`         | Dependencies to put in the default catalog                                         | inferred                               |
 | `--catalogs`              | `none`, `default` or `named`                                                       | `default` for new repos                |
-| `--formatter`             | `oxfmt`, or `prettier` or `biome` for repositories that already use them           | inferred, else `oxfmt`                 |
+| `--formatter`             | `oxfmt`, `prettier`, `biome` (only where already used) or `none`                   | inferred, else `oxfmt`                 |
 | `--newPackage`            | Name of a package to add under `packages/`                                         |                                        |
 | `--newPackageDescription` | Description of the `--newPackage`                                                  |                                        |
 | `--node`                  | Node.js version for `.nvmrc` and CI                                                | `26.13.1`                              |
@@ -142,7 +142,7 @@ A transition adds what a repository is missing and leaves what it has:
 - Jobs CTM finds in an existing workflow are the repository's: CTM doesn't add steps to them or change their settings, apart from `node-version` matrices.
 - A `.gitignore` entry that would hide existing directories, like `lib/` in a repository with `src/lib` folders, isn't added; a suggestion says so.
 - Switching task runners on an existing repository doesn't replace its existing `build` and `test` scripts.
-- A repository testing with something other than Vitest, like `node --test` or jest in its packages, gets no Vitest config, CI test jobs, lint rules or starter tests. Once CTM manages a repository with no Vitest anywhere, later transitions keep it that way.
+- A repository testing with something other than Vitest gets no Vitest config, CI test jobs, lint rules or starter tests. Once CTM manages a repository with no Vitest anywhere, later transitions keep it that way.
 - A repository's own root Vitest config is kept, and its packages' test scripts are left to it.
 - An existing `tsdown` older than the one CTM pins is kept, with a suggestion to update it, since new packages' configs spread a base written for CTM's version.
 - If tsdown's workspace mode would skip a package config without its own `entry`, packages build with their own `tsdown` scripts instead of one root `tsdown`.
@@ -156,8 +156,9 @@ A transition adds what a repository is missing and leaves what it has:
 - A root `tsconfig.json` that packages extend is left as it is, without a `tsc -b` typecheck, since packages would inherit what CTM adds to it.
 - Oxfmt can't load `oxfmt.config.ts` in a root with `"type": "commonjs"`; a suggestion says so.
 - Package tsconfigs that don't extend the build package's base are the repository's own: CTM leaves them alone, and existing packages without one don't get one.
-- Adopting CTM in a repository without a formatter formats it in full once with Oxfmt. A repository without ESLint gets CTM's strict, type-aware rules, which existing code may not meet yet: a suggestion explains running `pnpm lint --fix` and recording the rest with `eslint --suppress-all`.
-- Packages that run Vitest with their own scripts and no config of their own keep doing so: CTM adds no root `vitest.config.ts`, which they'd pick up instead.
+- In a repository without a formatter CTM knows (Oxfmt, Prettier or Biome), CTM adds none, so styling from dprint or ESLint isn't overwritten. Opt in with `--formatter oxfmt`, then run `pnpm format` once.
+- A repository without ESLint gets CTM's strict, type-aware rules, which existing code may not meet yet: a suggestion explains running `pnpm lint --fix` and recording the rest with `eslint --suppress-all`. CTM's lint job doesn't build first, so packages that export build output lint without each other's types until they're built.
+- Existing tests without a root Vitest config are left alone, whatever runs them, as with `--testRunner other`. Opt in to CTM's Vitest setup with `--testRunner vitest`.
 - pnpm 12.0.0 or newer is needed.
 
 ## Development

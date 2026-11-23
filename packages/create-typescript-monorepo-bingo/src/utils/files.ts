@@ -103,7 +103,13 @@ export const alternateConfigFiles = {
     'knip.jsonc',
     'knip.ts',
   ],
-  oxfmt: ['.oxfmtrc.json', '.oxfmtrc.jsonc', 'oxfmt.config.js', 'oxfmt.config.mjs'],
+  oxfmt: [
+    '.oxfmtrc.json',
+    '.oxfmtrc.jsonc',
+    'oxfmt.config.js',
+    'oxfmt.config.mjs',
+    'oxfmt.config.mts',
+  ],
   renovate: [
     '.github/renovate.json5',
     '.renovaterc',

@@ -87,7 +87,7 @@ export const rootOptionsShape = {
   description: z.string().describe('sentence-case description of the repository'),
   directory: z.string().optional().describe('directory to create the repository in'),
   email: z.string().optional().describe('author email for package.json files'),
-  formatter: literalUnion(['oxfmt', 'prettier', 'biome'] as const)
+  formatter: literalUnion(['oxfmt', 'prettier', 'biome', 'none'] as const)
     .optional()
     .describe(
       "formatter: 'oxfmt', or 'prettier' or 'biome' for repositories that already use them",
@@ -130,14 +130,6 @@ export const rootOptionsShape = {
     .string()
     .optional()
     .describe('dependency name that aliases TypeScript 7 for the tsc binary'),
-  packagesExportBuildOutput: z
-    .boolean()
-    .optional()
-    .describe("inferred: packages' exports point at build output, which typed linting needs"),
-  packagesRunVitest: z
-    .boolean()
-    .optional()
-    .describe('inferred: packages run Vitest themselves, which a root config would take over'),
   vitestConfigUnowned: z
     .boolean()
     .optional()
