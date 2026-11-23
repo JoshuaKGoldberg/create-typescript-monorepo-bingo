@@ -1,3 +1,4 @@
+// cspell:ignore widgetco zentrix zorbix
 import type { CreatedDirectory, IntakeDirectory } from 'bingo-fs';
 import { describe, expect, it, vi } from 'vitest';
 import { parse as parseYaml } from 'yaml';
@@ -1270,6 +1271,52 @@ describe('round 11 regressions', () => {
     expect(
       prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).recursiveBuild,
     ).toBe(expected);
+  });
+});
+
+describe('round 13 adoption regressions', () => {
+  it('allows the owner and a new package name in spell checking', () => {
+    const files = createRepository({ owner: 'widgetco' });
+
+    expect(getFile(files, 'cspell.json')).toContain('"widgetco"');
+    expect(getFile(transition(files, { newPackage: 'zorbix' }).files, 'cspell.json')).toContain(
+      '"zorbix"',
+    );
+  });
+
+  it('has Knip ignore the TypeScript 7 alias when no root script runs tsc', () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.typecheck = 'turbo run typecheck';
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    expect(getFile(transition(files).files, 'knip.config.ts')).toContain("'typescript7'");
+  });
+
+  it("doesn't give an existing package without a tsconfig one of its own", () => {
+    const files = createRepository();
+    delete ((files.packages as IntakeDirectory).example as Record<string, unknown>)[
+      'tsconfig.json'
+    ];
+
+    expect(getFile(transition(files).files, 'packages/example/tsconfig.json')).toBeUndefined();
+  });
+
+  it('gives a new package the vitest devDependency packages CTM does not build declare', () => {
+    const files = createRepository();
+    for (const directory of ['one', 'two']) {
+      setFile(
+        files,
+        `packages/${directory}/package.json`,
+        JSON.stringify({ devDependencies: { vitest: 'catalog:' }, name: directory }, null, 2),
+      );
+    }
+
+    expect(
+      getFile(transition(files, { newPackage: 'probe' }).files, 'packages/probe/package.json'),
+    ).toContain('"vitest": "catalog:"');
   });
 });
 

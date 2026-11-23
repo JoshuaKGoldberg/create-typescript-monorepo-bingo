@@ -1,3 +1,5 @@
+// cspell:ignore widgetco zentrix zorbix
+
 /**
  * End-to-end tests: produces real repositories with the template, installs them,
  * runs every CI check in them, and verifies a second transition changes nothing.
@@ -36,7 +38,8 @@ const newRepository = {
   author: 'Ex Ample',
   description: 'An example monorepo.',
   email: 'ex@example.com',
-  owner: 'example-org',
+  // Not dictionary words, as spell checking must allow.
+  owner: 'widgetco-labs',
   repository: 'example',
   title: 'Example',
 } satisfies Partial<RootOptions>;
@@ -82,7 +85,7 @@ const scenarios: Scenario[] = [
     name: 'named-catalogs',
     steps: [
       { mode: 'setup', options: { ...newRepository, catalogs: 'named' } },
-      { mode: 'transition', options: { newPackage: '@example/third' } },
+      { mode: 'transition', options: { newPackage: '@example/zorbix' } },
     ],
   },
   {
@@ -205,7 +208,7 @@ const scenarios: Scenario[] = [
           '--mode',
           'setup',
           '--owner',
-          'example-org',
+          'zentrix',
           '--repository',
           'example',
           '--title',

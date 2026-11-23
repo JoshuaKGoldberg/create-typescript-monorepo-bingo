@@ -113,15 +113,23 @@ export const blockBuildPackage = rootBase.createBlock({
     const rootTsdownSpecifier = [rootManifest.devDependencies, rootManifest.dependencies]
       .map((dependencies) => (dependencies as Record<string, string> | undefined)?.tsdown)
       .find((specifier) => specifier !== undefined);
-    const rootBuild = (rootManifest.scripts as Record<string, string> | undefined)?.build;
+    const rootScripts = (rootManifest.scripts ?? {}) as Partial<Record<string, string>>;
+    const rootBuild = rootScripts.build;
     return {
       existing,
+      // Knip counts the TypeScript 7 alias as used through a root script that runs tsc,
+      // like CTM's typecheck, which a repository's own typecheck script replaces.
+      ...(rootScripts.typecheck !== undefined &&
+        !Object.values(rootScripts).some((script) => script && /\btsc\b/.test(script)) && {
+          rootLacksTsc: true,
+        }),
       ...(rootBuild !== undefined && { rootBuild }),
       ...(rootTsdownSpecifier && { rootTsdownSpecifier }),
     };
   },
   props: {
     rootBuild: z.string().optional(),
+    rootLacksTsc: z.boolean().optional(),
     rootTsdownSpecifier: z.string().optional(),
     existing: z
       .object({
@@ -238,12 +246,14 @@ export const blockBuildPackage = rootBase.createBlock({
           ],
         }),
         blockGitignore({ ignores: ['dist/', 'lib/'] }),
-        ...(rootToolsIndirect
+        ...(rootToolsIndirect || props.rootLacksTsc
           ? [
               blockKnip({
                 ignoreDependencies: [
-                  ...(ownsBase ? ['@arethetypeswrong/core', 'publint'] : []),
-                  'tsdown',
+                  ...(rootToolsIndirect
+                    ? [...(ownsBase ? ['@arethetypeswrong/core', 'publint'] : []), 'tsdown']
+                    : []),
+                  ...(props.rootLacksTsc ? [typescript7Alias] : []),
                 ],
               }),
             ]

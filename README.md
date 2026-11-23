@@ -146,6 +146,8 @@ A transition adds what a repository is missing and leaves what it has:
 - An existing `tsdown` older than the one CTM pins is kept, with a suggestion to update it, since new packages' configs spread a base written for CTM's version.
 - If tsdown's workspace mode would skip a package config without its own `entry`, packages build with their own `tsdown` scripts instead of one root `tsdown`.
 - A solution-style root `tsconfig.json`, with `"files": []`, is left as it is, so new packages' `tsdown.config.ts` files aren't in any tsconfig: add them to one for typed linting.
+- New packages get `build` and `test` scripts; other per-package scripts a task runner runs, like `lint`, are left to add, since sibling packages' commands may not apply to a new one.
+- The weekly transitions workflow doesn't regenerate an `actions.lock` file; re-run `gh actions-lock` when a transition PR changes workflow pins.
 - pnpm 12.0.0 or newer is needed.
 
 ## Development

@@ -2,6 +2,7 @@ import type { IntakeDirectory } from 'bingo-fs';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
+import type { RootOptions } from '../../options.ts';
 import {
   findAlternateConfig,
   getDirectory,
@@ -95,7 +96,10 @@ export const blockCSpell = rootBase.createBlock({
                 // The words CTM adds come from its workflows, which an ignored .github skips.
                 words: mergeList(
                   list('words'),
-                  list('ignorePaths')?.includes('.github') ? [] : (props.words ?? []),
+                  [
+                    ...(list('ignorePaths')?.includes('.github') ? [] : (props.words ?? [])),
+                    ...getNameWords(options, props.existing === undefined),
+                  ],
                   compareCaseInsensitive,
                 ),
               },
@@ -105,6 +109,27 @@ export const blockCSpell = rootBase.createBlock({
     });
   },
 });
+
+/**
+ * Gets words from names CTM writes into files, like the owner in LICENSE.md and authors,
+ * which may not be dictionary words. An existing cspell.json already passes for the
+ * repository's names, so it only gets a new package's.
+ */
+function getNameWords(options: RootOptions, isNew: boolean): string[] {
+  const names = [
+    ...(isNew ? [options.owner, options.author, options.repository, options.scope] : []),
+    options.newPackage,
+  ];
+  // cspell skips words shorter than four letters.
+  return [
+    ...new Set(
+      names
+        .flatMap((name) => name?.split(/\P{L}+/u) ?? [])
+        .filter((word) => word.length >= 4)
+        .map((word) => word.toLowerCase()),
+    ),
+  ];
+}
 
 /**
  * Whether a repository runs cspell, from its scripts, lint-staged or workflows.

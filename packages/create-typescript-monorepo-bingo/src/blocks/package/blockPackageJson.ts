@@ -187,13 +187,15 @@ function toRepositoryObject(repository: unknown, fallbackUrl: string): Record<st
  * as some repositories' lint rules require, so a new package declares them the same way.
  */
 function getSiblingToolDependencies(options: RootOptions, pkg: PackageSpec) {
-  const others = (options.packages ?? []).filter(
-    (other) => other.kind === 'library' && other.directory !== pkg.directory,
-  );
   const tools = options.testRunner === 'other' ? ['tsdown'] : ['tsdown', 'vitest'];
 
   return Object.fromEntries(
     tools.flatMap((tool) => {
+      // Packages CTM doesn't build, like ones built with tsc, still test like the rest.
+      const kinds = tool === 'vitest' ? ['library', 'repo-owned'] : ['library'];
+      const others = (options.packages ?? []).filter(
+        (other) => kinds.includes(other.kind) && other.directory !== pkg.directory,
+      );
       const specifiers = others.flatMap((other) => other.toolDevDependencies?.[tool] ?? []);
       if (specifiers.length * 2 <= others.length) {
         return [];

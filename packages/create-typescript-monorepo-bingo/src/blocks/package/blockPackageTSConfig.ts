@@ -25,13 +25,23 @@ export const blockPackageTSConfig = packageBase.createBlock({
   },
   intake({ files }) {
     const existing = readText(files, 'tsconfig.json');
-    return existing === undefined ? undefined : { existing };
+    if (existing !== undefined) {
+      return { existing };
+    }
+
+    // An existing package without a tsconfig uses one above it, like the root's.
+    return readText(files, 'package.json') === undefined ? undefined : { inherited: true };
   },
   props: {
     existing: z.string().optional(),
+    inherited: z.boolean().optional(),
   },
   produce({ options, props }) {
     const { package: pkg } = options;
+    if (props.inherited) {
+      return {};
+    }
+
     const existing = parseJsonText(props.existing) as TSConfig & Record<string, unknown>;
 
     // A solution-style tsconfig, with no files of its own, is the package's own layout.
