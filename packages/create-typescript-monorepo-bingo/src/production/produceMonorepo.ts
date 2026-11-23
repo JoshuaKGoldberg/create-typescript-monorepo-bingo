@@ -132,7 +132,7 @@ function produceMonorepoOnce({
       ...(readText(files, '.github/workflows/actions.lock') !== undefined &&
       listFiles(creation.files).some(
         (file) =>
-          file.startsWith('.github/') &&
+          (file.startsWith('.github/workflows/') || file.startsWith('.github/actions/')) &&
           readText(files, file) !== readCreated(creation.files, file),
       )
         ? ['Workflows changed, so run `gh actions-lock` to update .github/workflows/actions.lock.']
@@ -156,8 +156,13 @@ export function normalizeOptions(options: RootOptions): RootOptions {
     );
   }
 
-  if (options.pnpm !== undefined && !semver.valid(options.pnpm)) {
-    throw new Error(`--pnpm must be a full version, like ${defaults.pnpm}, not '${options.pnpm}'.`);
+  if (
+    options.pnpm !== undefined &&
+    !(semver.valid(options.pnpm) && semver.gte(options.pnpm, '12.0.0'))
+  ) {
+    throw new Error(
+      `--pnpm must be a full version of pnpm 12 or newer, like ${defaults.pnpm}, not '${options.pnpm}'.`,
+    );
   }
 
   const packages: PackageSpec[] = [...(options.packages ?? [])];
@@ -176,7 +181,11 @@ export function normalizeOptions(options: RootOptions): RootOptions {
     const collision =
       created.directory === 'packages/build'
         ? { name: 'the build package' }
-        : packages.find((pkg) => pkg.directory === created.directory);
+        : ['node_modules', 'dist', 'lib', 'coverage'].includes(
+              created.directory.split('/').pop() ?? '',
+            )
+          ? { name: 'a reserved directory name' }
+          : packages.find((pkg) => pkg.directory === created.directory);
     if (collision) {
       throw new Error(
         `Can't add --newPackage ${options.newPackage}: ${created.directory} already holds ${collision.name}.`,

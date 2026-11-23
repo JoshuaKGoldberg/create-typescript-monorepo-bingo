@@ -93,7 +93,13 @@ export const blockVitest = rootBase.createBlock({
         }),
         blockGitignore({ ignores: ['coverage/'] }),
         blockRootPackageJson({
-          devDependencies: pinned('@vitest/coverage-v8', 'console-fail-test', 'vitest'),
+          // The Vitest config uses Node.js APIs.
+          devDependencies: pinned(
+            '@types/node',
+            '@vitest/coverage-v8',
+            'console-fail-test',
+            'vitest',
+          ),
           scripts: usesTaskRunner(options)
             ? { 'test:coverage': 'vitest run --coverage' }
             : { test: 'vitest' },

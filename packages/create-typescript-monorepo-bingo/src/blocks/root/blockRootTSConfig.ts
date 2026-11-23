@@ -80,6 +80,7 @@ export const blockRootTSConfig = rootBase.createBlock({
                       skipLibCheck: true,
                       strict: true,
                       target: 'ES2022',
+                      types: ['node'],
                     }),
                   noEmit: true,
                   tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.json',

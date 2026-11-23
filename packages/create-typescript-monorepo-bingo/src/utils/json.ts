@@ -104,9 +104,20 @@ function isStrictJson(text: string) {
  * Stringifies a package.json, sorted the way eslint-plugin-package-json expects.
  */
 export function formatPackageJson(value: Record<string, unknown>, existingText?: string): string {
-  // Only new manifests are sorted: an existing one keeps its key order.
+  // New manifests are sorted, and so are existing ones that already were; others keep
+  // their key order.
   const cleaned = removeUndefined(value);
-  return formatJson(existingText === undefined ? sortPackageJson(cleaned) : cleaned, existingText);
+  const existing: unknown = existingText === undefined ? undefined : parseJsonc(existingText);
+  const wasSorted =
+    existing !== undefined &&
+    isDeepStrictEqual(
+      JSON.stringify(sortPackageJson(existing as object)),
+      JSON.stringify(existing),
+    );
+  return formatJson(
+    existing === undefined || wasSorted ? sortPackageJson(cleaned) : cleaned,
+    existingText,
+  );
 }
 
 /**

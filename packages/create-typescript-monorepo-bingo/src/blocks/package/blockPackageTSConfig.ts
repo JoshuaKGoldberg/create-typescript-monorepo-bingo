@@ -6,6 +6,7 @@ import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatJson, withDefaults } from '../../utils/json.ts';
 import { mergeList } from '../../utils/lists.ts';
 import { getBuildPackageName } from '../../utils/options.ts';
+import { blockPnpmWorkspace } from '../root/blockPnpmWorkspace.ts';
 import { blockRootTSConfig } from '../root/blockRootTSConfig.ts';
 
 interface TSConfig {
@@ -82,7 +83,11 @@ export const blockPackageTSConfig = packageBase.createBlock({
       // tsconfig's choice, since some repositories leave packages out on purpose.
       extensions:
         props.existing === undefined
-          ? [asPackageExtension(blockRootTSConfig({ references: [pkg.directory] }))]
+          ? [
+              asPackageExtension(blockRootTSConfig({ references: [pkg.directory] })),
+              // A new package needs a workspace glob that covers its directory.
+              asPackageExtension(blockPnpmWorkspace({ packages: [pkg.directory] })),
+            ]
           : [],
       files: {
         'tsconfig.json': formatJson(

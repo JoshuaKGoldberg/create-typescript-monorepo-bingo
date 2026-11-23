@@ -661,4 +661,63 @@ export default config;
       'engines_check',
     );
   });
+
+  it('ignores package build outputs when only root ones were ignored', () => {
+    const files = createRepository();
+    setFile(files, '.gitignore', 'node_modules\n/dist\n/lib\n');
+
+    const gitignore = getFile(transition(files).files, '.gitignore') ?? '';
+
+    expect(gitignore).toContain('\ndist/');
+    expect(gitignore).toContain('\nlib/');
+  });
+
+  it("doesn't ignore a package named like a build output", () => {
+    const gitignore = getFile(createRepository({ repository: 'lib' }), '.gitignore') ?? '';
+
+    expect(gitignore).not.toMatch(/^lib\/$/m);
+    expect(gitignore).toContain('packages/*/lib/');
+  });
+
+  it('adds a new package outside existing globs to the workspace', () => {
+    const files = createRepository();
+    setFile(
+      files,
+      'pnpm-workspace.yaml',
+      "packages:\n  - 'packages/build'\n  - 'packages/example'\n",
+    );
+
+    expect(
+      getFile(transition(files, { newPackage: 'second' }).files, 'pnpm-workspace.yaml'),
+    ).toContain('packages/second');
+  });
+
+  it('gives new packages scripts when the root runs them recursively', () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.build = 'pnpm -r build';
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    expect(
+      getFile(transition(files, { newPackage: 'second' }).files, 'packages/second/package.json'),
+    ).toContain('"build": "tsdown"');
+  });
+
+  it('keeps a sorted package.json sorted when adding to it', () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as Record<string, unknown>;
+    delete manifest.repository;
+    (manifest.scripts as Record<string, string>) = { build: 'tsdown', test: 'vitest' };
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    const output = JSON.parse(getFile(transition(files).files, 'package.json') ?? '{}') as {
+      scripts: Record<string, string>;
+    };
+    const keys = Object.keys(output);
+
+    expect(keys.indexOf('repository')).toBeLessThan(keys.indexOf('license'));
+    expect(Object.keys(output.scripts)).toEqual(Object.keys(output.scripts).sort());
+  });
 });

@@ -153,14 +153,17 @@ function syncNodeVersions(
     return false;
   }
 
-  // CTM's versions come in its order, then any others the repository keeps.
-  const keyOf = (item: unknown) => (isScalar(item) ? String(item.value) : item);
-  const byValue = new Map(kept.map((item) => [keyOf(item), item]));
-  const oursKeys = new Set(ours.map(String));
-  existing.items = [
-    ...ours.map((version) => byValue.get(String(version)) ?? document.createNode(version)),
-    ...kept.filter((item) => !oursKeys.has(keyOf(item) as string)),
-  ];
+  // New versions go in ascending position among the kept ones, so sorted lists stay sorted.
+  const items = [...kept];
+  for (const version of added) {
+    const target = semver.coerce(String(version));
+    const index = items.findIndex((item) => {
+      const current = isScalar(item) ? semver.coerce(String(item.value)) : null;
+      return !!target && !!current && semver.gt(current, target);
+    });
+    items.splice(index === -1 ? items.length : index, 0, document.createNode(version));
+  }
+  existing.items = items;
   return true;
 }
 
@@ -254,7 +257,7 @@ function allowsNodeVersion(nodeEngines: string, value: unknown) {
     return semver.satisfies(version, nodeEngines);
   }
 
-  if (!/^\d+(?:\.\d+)?$/.test(version)) {
+  if (!/^\d+(?:\.(?:\d+|x))?(?:\.x)?$/.test(version)) {
     return true;
   }
 

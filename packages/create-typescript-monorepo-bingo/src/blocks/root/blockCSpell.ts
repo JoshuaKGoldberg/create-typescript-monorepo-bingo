@@ -1,8 +1,10 @@
+import type { IntakeDirectory } from 'bingo-fs';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import {
   findAlternateConfig,
+  getDirectory,
   parseJsonText,
   readText,
   withoutAlternate,
@@ -43,8 +45,7 @@ export const blockCSpell = rootBase.createBlock({
       ...(alternate && { alternate }),
       ...(existing !== undefined && { existing }),
       // A repository that has a cspell.json but doesn't run cspell uses it for editors only.
-      ...(existing !== undefined &&
-        !scripts.some((script) => script.includes('cspell')) && { editorOnly: true }),
+      ...(existing !== undefined && !runsCSpell(files, scripts) && { editorOnly: true }),
     };
   },
   props: {
@@ -99,3 +100,15 @@ export const blockCSpell = rootBase.createBlock({
     });
   },
 });
+
+/**
+ * Whether a repository runs cspell, from its scripts, lint-staged or workflows.
+ */
+function runsCSpell(files: IntakeDirectory, scripts: string[]) {
+  const workflows = Object.values(getDirectory(files, '.github/workflows') ?? {});
+  return (
+    scripts.some((script) => script.includes('cspell')) ||
+    (readText(files, 'package.json') ?? '').includes('cspell ') ||
+    workflows.some((entry) => Array.isArray(entry) && /cspell/i.test(entry[0]))
+  );
+}

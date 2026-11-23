@@ -89,7 +89,7 @@ export function prepareRoot(
     }),
     ...inferReleaseApp(files),
     ...(scope && { scope }),
-    taskRunner: inferTaskRunner(files, workspace),
+    taskRunner: inferTaskRunner(files, workspace, rootManifest),
     ...inferTitle(files),
     ...inferTypeScript7Alias(rootManifest, workspace),
     ...inferFormatter(files, rootManifest),
@@ -401,7 +401,11 @@ function inferReleaseApp(files: IntakeDirectory): Partial<RootOptions> {
   return match?.[1] ? { releaseApp: match[1] } : {};
 }
 
-function inferTaskRunner(files: IntakeDirectory, workspace: undefined | WorkspaceYaml): TaskRunner {
+function inferTaskRunner(
+  files: IntakeDirectory,
+  workspace: undefined | WorkspaceYaml,
+  manifest: PackageManifest | undefined,
+): TaskRunner {
   if (getEntry(files, 'turbo.json')) {
     return 'turbo';
   }
@@ -410,7 +414,9 @@ function inferTaskRunner(files: IntakeDirectory, workspace: undefined | Workspac
     return 'nx';
   }
 
-  return workspace?.tasks ? 'pnpm' : 'none';
+  // A root that builds by running each package's script is using pnpm as its task runner.
+  const build = manifest?.scripts?.build ?? '';
+  return workspace?.tasks || /^pnpm (?:-r|--recursive|--filter)\b/.test(build) ? 'pnpm' : 'none';
 }
 
 function inferTitle(files: IntakeDirectory): Partial<RootOptions> {

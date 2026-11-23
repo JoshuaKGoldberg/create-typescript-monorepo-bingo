@@ -289,6 +289,9 @@ importers:
       bingo-systems:
         specifier: ^0.9.1
         version: 0.9.1
+      ignore:
+        specifier: ^7.0.5
+        version: 7.0.16
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1
