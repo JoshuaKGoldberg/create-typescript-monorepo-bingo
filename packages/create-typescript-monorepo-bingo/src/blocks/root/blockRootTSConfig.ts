@@ -57,12 +57,15 @@ export const blockRootTSConfig = rootBase.createBlock({
 
     // A solution-style config, with no files of its own, only gets references.
     const isSolution = Array.isArray(existing.files) && !existing.files.length;
+    // Package config files, like tsdown.config.ts, aren't in any package's tsconfig.
+    const packageConfigGlobs = getPackageGlobs(options, '*.config.ts').map((glob) => `./${glob}`);
+    const existingInclude = existing.include as string[] | undefined;
     const include = new Set([
-      ...((existing.include as string[] | undefined) ?? [
-        './*.config.ts',
-        // Package config files, like tsdown.config.ts, aren't in any package's tsconfig.
-        ...getPackageGlobs(options, '*.config.ts').map((glob) => `./${glob}`),
-      ]),
+      ...(existingInclude ?? ['./*.config.ts', ...packageConfigGlobs]),
+      // An include with package config globs gets ones for new package directories too.
+      ...(existingInclude?.some((glob) => /^\.\/.+\/\*\.config\.ts$/.test(glob))
+        ? packageConfigGlobs
+        : []),
       ...(props.include ?? []),
     ]);
 

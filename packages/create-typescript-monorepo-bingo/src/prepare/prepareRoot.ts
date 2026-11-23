@@ -91,7 +91,9 @@ export function prepareRoot(
     ...inferReleaseApp(files),
     ...(scope && { scope }),
     taskRunner: inferTaskRunner(files, workspace, rootManifest),
-    ...(recursivePnpm.test(rootManifest?.scripts?.build ?? '') && { recursiveBuild: true }),
+    ...(buildsLibrariesRecursively(rootManifest?.scripts?.build, packages) && {
+      recursiveBuild: true,
+    }),
     ...inferTitle(files),
     ...inferTypeScript7Alias(rootManifest, workspace),
     ...inferFormatter(files, rootManifest),
@@ -153,7 +155,13 @@ export function findWorkspacePackages(
     for (const directory of candidates) {
       const packageFiles = getDirectory(files as IntakeDirectory, directory);
       const manifest = readJson(packageFiles, 'package.json') as PackageManifest | undefined;
-      if (packageFiles && manifest && !isExcluded(directory, excluded)) {
+      // Overlapping globs, like packages/* and packages/a, find a package once.
+      if (
+        packageFiles &&
+        manifest &&
+        !isExcluded(directory, excluded) &&
+        !found.some((pkg) => pkg.directory === directory)
+      ) {
         found.push({ directory, files: packageFiles, manifest });
       }
     }
@@ -431,6 +439,41 @@ function inferTaskRunner(
 
 const recursivePnpm = /\bpnpm\b[^&|;]*\s(?:-r|--recursive|-F|--filter)\b/;
 
+/**
+ * Whether a root build script runs library packages' own build scripts, with pnpm
+ * recursively or filtered to them, rather than, say, only a docs site's.
+ */
+function buildsLibrariesRecursively(script: string | undefined, packages: PackageSpec[]) {
+  if (!script || !recursivePnpm.test(script)) {
+    return false;
+  }
+
+  const filters = [...script.matchAll(/(?:-F|--filter)(?:=|\s+)["']?([^\s"']+)/g)].map(
+    ([, filter = '']) => filter,
+  );
+  if (!filters.length) {
+    return true;
+  }
+
+  const libraries = packages.filter((pkg) => pkg.kind === 'library');
+  return filters.some((filter) => {
+    // Path filters, like ./packages/*, are relative to the root; others match names.
+    const isPath = filter.startsWith('.') || filter.startsWith('{');
+    const pattern = new RegExp(
+      `^${filter
+        .replace(/^\{(.*)\}$/, '$1')
+        .replace(/^\.\//, '')
+        .replace(/\.{3}$|^\.{3}/g, '')
+        .replaceAll(/[.+?^${}()|[\]\\]/g, '\\$&')
+        .replaceAll('*', '.*')}$`,
+    );
+    return (
+      filter.startsWith('!') ||
+      libraries.some((pkg) => pattern.test(isPath ? pkg.directory : pkg.name))
+    );
+  });
+}
+
 function inferTitle(files: IntakeDirectory): Partial<RootOptions> {
   const readme = readText(files, 'README.md');
   const match = readme && (/<h1[^>]*>([^<]+)<\/h1>/.exec(readme) ?? /^# (.+)$/m.exec(readme));
@@ -630,7 +673,9 @@ function inferTestRunner(
 
   // Packages testing with something else, or a repository CTM already manages without
   // Vitest anywhere, as \`--testRunner other\` leaves it.
-  const managed = isOwnedFile(readText(files, 'eslint.config.ts'));
+  const managed = ['eslint.config.ts', 'knip.config.ts', 'packages/build/src/tsdown/base.ts'].some(
+    (path) => isOwnedFile(readText(files, path)),
+  );
   return packages.some((pkg) => pkg.manifest.scripts?.test) || managed
     ? { testRunner: 'other' }
     : {};

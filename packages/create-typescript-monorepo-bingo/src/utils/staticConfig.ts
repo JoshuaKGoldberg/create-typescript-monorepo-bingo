@@ -364,11 +364,13 @@ type SpannedNode = AstNode & { end: number; start: number };
 /**
  * Finds what a repository added to a flat ESLint config made by CTM. CTM's own entries are
  * matched by their `files` and keys, at most once each; every other entry, import and
- * top-level statement is kept, along with comments before them.
+ * top-level statement is kept, along with comments before them. Entries and imports in
+ * `dropped`, which CTM no longer writes, are removed only when their text matches exactly.
  */
 export function readESLintExtras(
   sourceText: string | undefined,
   ownSource: string,
+  dropped?: { configs: string[]; imports: string[] },
 ): ESLintExtras | undefined {
   if (sourceText === undefined) {
     return undefined;
@@ -383,9 +385,11 @@ export function readESLintExtras(
   const own = parseSync('eslint.config.ts', ownSource);
   const ownBody = own.program.body as unknown as SpannedNode[];
   const ownImportNodes = ownBody.filter((node) => node.type === 'ImportDeclaration');
-  const ownImports = new Set(
-    ownImportNodes.map((node) => normalize(ownSource.slice(node.start, node.end))),
-  );
+  const ownImports = new Set([
+    ...ownImportNodes.map((node) => normalize(ownSource.slice(node.start, node.end))),
+    ...(dropped?.imports.map(normalize) ?? []),
+  ]);
+  const droppedConfigs = new Set(dropped?.configs.map(normalizeCode));
   const remaining = getConfigArgs(ownBody).map(getESLintConfigSignature);
 
   const exported = body.find((node) => node.type === 'ExportDefaultDeclaration');
@@ -439,6 +443,10 @@ export function readESLintExtras(
     previousEnd = arg.end;
 
     const index = remaining.indexOf(getESLintConfigSignature(arg));
+    if (droppedConfigs.has(normalizeCode(sourceText.slice(arg.start, arg.end)))) {
+      continue;
+    }
+
     if (index === -1) {
       configs.push([...comments, sourceText.slice(arg.start, arg.end)].join('\n  '));
     } else {
@@ -477,6 +485,16 @@ function getComments(between: string) {
 
 function normalize(text: string) {
   return text.replaceAll(/\s+/g, ' ').replaceAll('"', "'").replace(/;$/, '').trim();
+}
+
+/**
+ * Normalizes code for comparison, ignoring whitespace, quotes and trailing commas.
+ */
+function normalizeCode(text: string) {
+  return normalize(text)
+    .replaceAll(/,(\s*[}\]])/g, '$1')
+    .replaceAll(/([{[])\s+/g, '$1')
+    .replaceAll(/\s+([}\]])/g, '$1');
 }
 
 function findDeclaration(body: SpannedNode[], name: string): SpannedNode | undefined {

@@ -980,17 +980,137 @@ export default config;
 
   it('gives a new package the homepage its sibling libraries share', () => {
     const files = createRepository();
-    const pkg = JSON.parse(getFile(files, 'packages/example/package.json') ?? '{}') as Record<
-      string,
-      unknown
-    >;
-    pkg.homepage = 'https://example.dev';
-    setFile(files, 'packages/example/package.json', JSON.stringify(pkg, null, 2));
+    applyFiles(files, transition(files, { newPackage: 'second' }).files);
+    for (const directory of ['example', 'second']) {
+      setHomepage(files, `packages/${directory}`, 'https://example.dev');
+    }
 
-    const output = transition(files, { newPackage: 'second' }).files;
+    const output = transition(files, { newPackage: 'third' }).files;
 
-    expect(getFile(output, 'packages/second/package.json')).toContain(
+    expect(getFile(output, 'packages/third/package.json')).toContain(
       '"homepage": "https://example.dev"',
     );
   });
+
+  it("doesn't copy a homepage from a single sibling or one naming a package", () => {
+    const single = createRepository();
+    setHomepage(single, 'packages/example', 'https://example.dev');
+
+    expect(
+      getFile(transition(single, { newPackage: 'second' }).files, 'packages/second/package.json'),
+    ).not.toContain('"homepage"');
+
+    const named = createRepository();
+    applyFiles(named, transition(named, { newPackage: 'second' }).files);
+    for (const directory of ['example', 'second']) {
+      setHomepage(
+        named,
+        `packages/${directory}`,
+        `https://github.com/example-org/example/tree/main/packages/${directory}#readme`,
+      );
+    }
+    setHomepage(
+      named,
+      'packages/second',
+      'https://github.com/example-org/example/tree/main/packages/example#readme',
+    );
+
+    expect(
+      getFile(transition(named, { newPackage: 'third' }).files, 'packages/third/package.json'),
+    ).not.toContain('"homepage"');
+  });
+
+  it("keeps a repository's own entry for test files when it doesn't use Vitest", () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.test = 'jest';
+    delete manifest.devDependencies.vitest;
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+    const jestEntry = `{
+    extends: [jest.configs['flat/recommended']],
+    files: ['**/*.test.*'],
+    rules: { 'jest/no-conditional-expect': 'off' },
+    settings: { jest: { version: 30 } },
+  }`;
+    setFile(
+      files,
+      'eslint.config.ts',
+      (getFile(files, 'eslint.config.ts') ?? '')
+        .replace(
+          "import vitest from '@vitest/eslint-plugin';",
+          "import jest from 'eslint-plugin-jest';",
+        )
+        .replace(/\{\n {4}extends: \[vitest[\s\S]*?typecheck: true \} \},\n {2}\}/, jestEntry),
+    );
+
+    applyFiles(files, transition(files).files);
+    const config = getFile(files, 'eslint.config.ts');
+
+    expect(config).toContain(jestEntry);
+    expect(config).toContain("import jest from 'eslint-plugin-jest';");
+    expect(config).not.toContain('vitest');
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it('gives a library in a top-level directory no Vitest project script, and lints its configs', () => {
+    const files = createRepository({ taskRunner: 'pnpm' });
+    const example = (files.packages as IntakeDirectory).example as IntakeDirectory;
+    files.tools = structuredClone(example);
+    const pkg = JSON.parse(getFile(files, 'tools/package.json') ?? '{}') as Record<string, unknown>;
+    pkg.name = 'tools';
+    pkg.scripts = {};
+    setFile(files, 'tools/package.json', JSON.stringify(pkg, null, 2));
+    setFile(files, 'pnpm-workspace.yaml', "packages:\n  - 'packages/*'\n  - tools\n");
+
+    const output = transition(files).files;
+
+    expect(getFile(output, 'tools/package.json')).not.toContain('vitest');
+    expect(getFile(output, 'tsconfig.json')).toContain('./tools/*.config.ts');
+    expect(getFile(output, 'eslint.config.ts')).toContain("'tools/dist'");
+  });
+
+  it("doesn't build packages per package when the root build only filters a site", () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.build = 'tsdown && pnpm --filter ./docs build';
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    expect(
+      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).recursiveBuild,
+    ).toBeUndefined();
+
+    manifest.scripts.build = 'pnpm --filter "./packages/*" build';
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    expect(
+      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).recursiveBuild,
+    ).toBe(true);
+  });
+
+  it('keeps another test runner in a managed repository whose ESLint config it took over', () => {
+    const files = createRepository({ testRunner: 'other' });
+    setFile(
+      files,
+      'eslint.config.ts',
+      (getFile(files, 'eslint.config.ts') ?? '').replace(ownedFileMarker, ''),
+    );
+
+    expect(
+      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).testRunner,
+    ).toBe('other');
+  });
 });
+
+function setHomepage(files: IntakeDirectory, directory: string, homepage: string) {
+  const pkg = JSON.parse(getFile(files, `${directory}/package.json`) ?? '{}') as Record<
+    string,
+    unknown
+  >;
+  pkg.homepage = homepage;
+  setFile(files, `${directory}/package.json`, JSON.stringify(pkg, null, 2));
+}

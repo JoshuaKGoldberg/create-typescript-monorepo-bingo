@@ -53,11 +53,12 @@ export const blockPnpmWorkspace = rootBase.createBlock({
 
     // Package globs: keep what's there, adding any new ones.
     const existingGlobs = readStrings(document.get('packages'));
+    const baseGlobs = existingGlobs.length ? existingGlobs : ['packages/*'];
     const globs = mergeList(existingGlobs.length ? existingGlobs : undefined, [
-      ...(existingGlobs.length ? [] : ['packages/*']),
-      // Package directories that no existing glob covers, like a new packages/build.
+      ...baseGlobs,
+      // Package directories that no glob covers, like a new packages/build.
       ...(props.packages ?? []).filter(
-        (directory) => !existingGlobs.some((glob) => globCovers(glob, directory)),
+        (directory) => !baseGlobs.some((glob) => globCovers(glob, directory)),
       ),
     ]);
     // New globs are appended to an existing list, keeping its comments and quoting.

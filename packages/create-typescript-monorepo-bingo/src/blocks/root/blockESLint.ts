@@ -48,11 +48,18 @@ export const blockESLint = rootBase.createBlock({
       '.eslintrc.yml',
     ].find((name) => getEntry(files, name) !== undefined);
     const existingIgnores = readESLintIgnoresWithSource(existing);
+    const vitest = options.testRunner !== 'other';
     const extras = readESLintExtras(
       existing,
-      // Compared with CTM's full config, so its Vitest entries aren't kept as the
-      // repository's own when a repository stops using Vitest.
-      createESLintConfig('', options.workflowExtension ?? defaults.workflowExtension),
+      createESLintConfig(
+        '',
+        options.workflowExtension ?? defaults.workflowExtension,
+        undefined,
+        vitest,
+      ),
+      // Without Vitest, CTM's own Vitest entry and import are dropped, but only as CTM wrote
+      // them: a repository's own entry for test files, like one for Jest, stays.
+      vitest ? undefined : { configs: [vitestConfigEntry], imports: [vitestImport] },
     );
     return {
       ...(alternate && { alternate }),
@@ -188,6 +195,19 @@ export const blockESLint = rootBase.createBlock({
   },
 });
 
+const vitestImport = "import vitest from '@vitest/eslint-plugin';";
+
+const vitestConfigEntry = `{
+    extends: [vitest.configs.recommended],
+    files: ['**/*.test.*'],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-class-instance-assignment': 'off',
+      'vitest/no-conditional-expect': 'off',
+    },
+    settings: { vitest: { typecheck: true } },
+  }`;
+
 const ownImports = [
   [
     '@eslint-community/eslint-plugin-eslint-comments/configs',
@@ -195,7 +215,7 @@ const ownImports = [
   ],
   ['@eslint/js', "import js from '@eslint/js';"],
   ['@eslint/markdown', "import markdown from '@eslint/markdown';"],
-  ['@vitest/eslint-plugin', "import vitest from '@vitest/eslint-plugin';"],
+  ['@vitest/eslint-plugin', vitestImport],
   ['eslint-plugin-jsdoc', "import jsdoc from 'eslint-plugin-jsdoc';"],
   ['eslint-plugin-jsonc', "import jsonc from 'eslint-plugin-jsonc';"],
   ['eslint-plugin-package-json', "import packageJson from 'eslint-plugin-package-json';"],
@@ -307,16 +327,7 @@ ${extras?.exportComments.length ? `${extras.exportComments.join('\n')}\n` : ''}e
 ${
   vitest
     ? `  // Test only rules
-  {
-    extends: [vitest.configs.recommended],
-    files: ['**/*.test.*'],
-    rules: {
-      '@typescript-eslint/no-unsafe-assignment': 'off',
-      '@typescript-eslint/no-unsafe-class-instance-assignment': 'off',
-      'vitest/no-conditional-expect': 'off',
-    },
-    settings: { vitest: { typecheck: true } },
-  },
+  ${vitestConfigEntry},
 `
     : ''
 }  {

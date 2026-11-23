@@ -191,7 +191,7 @@ export const blockBuildPackage = rootBase.createBlock({
         semver.validRange(props.rootTsdownSpecifier) &&
         semver.lt(semver.minVersion(props.rootTsdownSpecifier) ?? pin('tsdown'), pin('tsdown'))
           ? [
-              `The root's tsdown ${props.rootTsdownSpecifier} doesn't include the ${pin('tsdown')} the build package's tsdown base is written for. Update it to ^${pin('tsdown')}, so packages build and typecheck with one tsdown.`,
+              `The root's tsdown ${props.rootTsdownSpecifier} allows versions older than the ${pin('tsdown')} the build package's tsdown base is written for. Update it to ^${pin('tsdown')}, so packages build and typecheck with one tsdown.`,
             ]
           : []),
         ...(workspaceReady

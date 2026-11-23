@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { packageBase } from '../../bases/packageBase.ts';
-import { defaults } from '../../options.ts';
+import { defaults, type PackageSpec } from '../../options.ts';
 import { asPackageExtension } from '../../production/asRootExtension.ts';
 import {
   type CatalogEntry,
@@ -72,22 +72,17 @@ export const blockPackageJson = packageBase.createBlock({
       resolved[field] = sortKeys(result.dependencies);
     }
 
-    const homepages = new Set(
-      (options.packages ?? [])
-        .filter((other) => other.kind === 'library' && other.directory !== pkg.directory)
-        .map((other) => other.homepage),
-    );
-    const [sharedHomepage] = homepages.size === 1 ? [...homepages] : [];
+    const sharedHomepage = getSharedHomepage(options.packages ?? [], pkg);
     const existingScripts = existing.scripts as Record<string, string> | undefined;
     // A package's own scripts win; a task runner only adds the ones it needs.
     // A repository's own Vitest config may not have CTM's per-package projects, so its
     // packages' tests are left to it, as are other test runners'.
+    // CTM's Vitest projects are the packages in parent directories, like packages/*,
+    // so a package in a top-level directory, like tools, has no project to run.
     const test =
-      options.testRunner === 'other'
+      options.testRunner === 'other' || options.vitestConfigUnowned || !pkg.directory.includes('/')
         ? undefined
-        : options.vitestConfigUnowned
-          ? undefined
-          : `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${pkg.directory.split('/').pop() ?? pkg.name}`;
+        : `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${pkg.directory.split('/').pop() ?? pkg.name}`;
     const scripts = buildsPerPackage(options)
       ? {
           build: 'tsdown',
@@ -163,4 +158,27 @@ function toRepositoryObject(repository: unknown, fallbackUrl: string): Record<st
   return repository && typeof repository === 'object'
     ? (repository as Record<string, unknown>)
     : { type: 'git', url: fallbackUrl };
+}
+
+/**
+ * Finds a homepage that every other library package shares, like a project website.
+ * One sibling isn't enough to tell, and a homepage naming a package, like its readme's
+ * URL, belongs to that package.
+ */
+function getSharedHomepage(packages: PackageSpec[], pkg: PackageSpec) {
+  const others = packages.filter(
+    (other) => other.kind === 'library' && other.directory !== pkg.directory,
+  );
+  const [homepage, ...rest] = new Set(others.map((other) => other.homepage));
+  if (others.length < 2 || rest.length || !homepage) {
+    return undefined;
+  }
+
+  const names = others.flatMap((other) => [
+    other.directory.split('/').pop() ?? other.directory,
+    other.name.split('/').pop() ?? other.name,
+  ]);
+  // Compared by whole URL path segments, so a site like bingo.js.org isn't ruled out.
+  const segments = new Set(homepage.replace(/^\w+:\/\/[^/]*/, '').split(/[/#?]/));
+  return names.some((name) => segments.has(name)) ? undefined : homepage;
 }

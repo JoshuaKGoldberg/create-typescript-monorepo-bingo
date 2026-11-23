@@ -109,14 +109,9 @@ export function buildsPerPackage(options: RootOptions): boolean {
  * Creates pnpm filters for every package directory, like `--filter "./packages/*"`.
  */
 export function getPackageFilters(options: RootOptions): string {
-  // Packages in top-level directories, like tools, have no parent to glob.
-  const topLevel = (options.packages ?? [])
-    .map((pkg) => pkg.directory)
-    .filter((directory) => !directory.includes('/'))
-    .sort();
   return [
     ...getPackageParents(options).map((parent) => `--filter "./${parent}/*"`),
-    ...topLevel.map((directory) => `--filter "./${directory}"`),
+    ...getTopLevelPackages(options).map((directory) => `--filter "./${directory}"`),
   ].join(' ');
 }
 
@@ -137,5 +132,18 @@ export function getPackageParents(options: RootOptions): string[] {
  * Gets glob patterns for an output directory, like `dist`, in every package.
  */
 export function getPackageGlobs(options: RootOptions, suffix: string): string[] {
-  return getPackageParents(options).map((parent) => `${parent}/*/${suffix}`);
+  return [
+    ...getPackageParents(options).map((parent) => `${parent}/*/${suffix}`),
+    ...getTopLevelPackages(options).map((directory) => `${directory}/${suffix}`),
+  ];
+}
+
+/**
+ * Gets packages in top-level directories, like tools, which have no parent to glob.
+ */
+function getTopLevelPackages(options: RootOptions): string[] {
+  return (options.packages ?? [])
+    .map((pkg) => pkg.directory)
+    .filter((directory) => !directory.includes('/'))
+    .sort();
 }
