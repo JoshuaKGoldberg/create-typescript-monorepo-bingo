@@ -248,9 +248,10 @@ function createFormatScripts(options: RootOptions, creation: Partial<Creation>) 
     options.formatter === 'prettier'
       ? 'prettier --ignore-unknown --write'
       : 'oxfmt --no-error-on-unmatched-pattern';
-  const quoted = files.map((file) => `'${file.replaceAll("'", "'\\''")}'`).join(' ');
+  // bingo runs commands without a shell, so paths are passed as plain arguments.
+  const paths = files.filter((file) => !/\s/.test(file)).join(' ');
 
-  return [{ commands: [`pnpm exec ${formatter} ${quoted}`], phase: 1 }];
+  return [{ commands: [`pnpm exec ${formatter} ${paths}`], phase: 1 }];
 }
 
 function listFiles(directory: CreatedDirectory, prefix = ''): string[] {
