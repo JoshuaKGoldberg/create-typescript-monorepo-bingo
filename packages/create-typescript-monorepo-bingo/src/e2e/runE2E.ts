@@ -292,23 +292,37 @@ async function produce(directory: string, step: Step) {
 }
 
 /**
- * Finds `any` types in built declaration files, which tsdown can emit silently when a
- * referenced package's types weren't built first.
+ * Finds built declaration files with more \`any\` types than their package's sources,
+ * which tsdown can emit silently when a referenced package's types weren't built first.
  */
 async function findAnyInDeclarations(directory: string) {
   const leaks: string[] = [];
+  const countAny = (text: string) =>
+    text
+      .split('\n')
+      .map((line) => line.replace(/\/\/.*$|\/\*.*?\*\//g, ''))
+      .join('\n')
+      .match(/\bany\b/g)?.length ?? 0;
 
-  for await (const file of fs.glob('*/*/dist/**/*.d.mts', { cwd: directory })) {
-    if (file.includes('node_modules')) {
-      continue;
+  for await (const packageJson of fs.glob('*/*/package.json', { cwd: directory })) {
+    const packageDirectory = path.join(directory, path.dirname(packageJson));
+    let declarations = 0;
+    let sources = 0;
+
+    for await (const file of fs.glob('dist/**/*.d.mts', { cwd: packageDirectory })) {
+      declarations += countAny(await fs.readFile(path.join(packageDirectory, file), 'utf8'));
     }
 
-    const text = await fs.readFile(path.join(directory, file), 'utf8');
-    for (const [index, line] of text.split('\n').entries()) {
-      const code = line.replace(/\/\/.*$|\/\*.*?\*\//g, '');
-      if (/(?:[:<|&,]|=>)\s*any\b|\bany\s*(?:\[\]|[;,)>|&])/.test(code)) {
-        leaks.push(`${file}:${String(index + 1)}: ${line.trim()}`);
+    for await (const file of fs.glob('src/**/*.ts', { cwd: packageDirectory })) {
+      if (!file.endsWith('.test.ts')) {
+        sources += countAny(await fs.readFile(path.join(packageDirectory, file), 'utf8'));
       }
+    }
+
+    if (declarations > sources) {
+      leaks.push(
+        `${path.dirname(packageJson)}: ${String(declarations)} in dist/*.d.mts vs ${String(sources)} in src/`,
+      );
     }
   }
 

@@ -4,9 +4,14 @@ import { type BlockCreation, producePreset } from 'bingo-stratum';
 
 import { rootBase } from '../bases/rootBase.ts';
 import type { PackageOptions, PackageSpec, RootOptions } from '../options.ts';
+import {
+  findSharedDependencies,
+  findWorkspacePackages,
+  type PackageManifest,
+} from '../prepare/prepareRoot.ts';
 import { packageBlocks, packagePreset, rootPreset } from '../presets.ts';
-import { getDirectory } from '../utils/files.ts';
-import { getLibraryPackages, sortByDependencies } from '../utils/options.ts';
+import { getDirectory, readJson } from '../utils/files.ts';
+import { getLibraryPackages, getPackageParents, sortByDependencies } from '../utils/options.ts';
 import { asRootExtension } from './asRootExtension.ts';
 
 export interface ProduceMonorepoSettings {
@@ -25,13 +30,41 @@ export interface ProduceMonorepoSettings {
  * its own small "carrier" Block, because Stratum's refinement extensions are applied
  * with a shallow spread that would lose entries and replace intake values.
  */
-export function produceMonorepo({
+export function produceMonorepo(settings: ProduceMonorepoSettings): Partial<Creation> {
+  const options = normalizeOptions(settings.options);
+
+  // A new repository has no manifests to find shared dependencies in, so they come
+  // from a first production of the manifests CTM is about to write.
+  if (options.catalogs === 'default' && options.catalogShared === undefined) {
+    const draft = produceMonorepoOnce({ ...settings, options: { ...options, catalogShared: [] } });
+    const draftFiles = toIntake(draft.files ?? {});
+    const manifests = findWorkspacePackages(
+      draftFiles,
+      getPackageParents(options).map((parent) => `${parent}/*`),
+    ).map((pkg) => ({ kind: 'library' as const, manifest: pkg.manifest }));
+    const root = readJson(draftFiles, 'package.json');
+
+    return produceMonorepoOnce({
+      ...settings,
+      options: {
+        ...options,
+        catalogShared: findSharedDependencies([
+          ...(root ? [{ kind: 'root' as const, manifest: root as PackageManifest }] : []),
+          ...manifests,
+        ]),
+      },
+    });
+  }
+
+  return produceMonorepoOnce({ ...settings, options });
+}
+
+function produceMonorepoOnce({
   files,
   mode,
   offline,
-  options: rawOptions,
+  options,
 }: ProduceMonorepoSettings): Partial<Creation> {
-  const options = normalizeOptions(rawOptions);
   const ownBlocks = new Set<unknown>(packageBlocks);
 
   const perPackage = sortByDependencies(getLibraryPackages(options)).map((pkg) => {
@@ -113,9 +146,6 @@ export function normalizeOptions(options: RootOptions): RootOptions {
 
   return {
     ...options,
-    // A new repository's default catalog holds what CTM itself adds to every manifest.
-    ...(options.catalogs === 'default' &&
-      options.catalogShared === undefined && { catalogShared: ['@types/node'] }),
     packages,
   };
 }
@@ -134,6 +164,22 @@ function createNewPackage(name: string, description: string | undefined): Packag
     kind: 'library',
     name,
   };
+}
+
+function toIntake(directory: CreatedDirectory): IntakeDirectory {
+  return Object.fromEntries(
+    Object.entries(directory).flatMap(([name, entry]) => {
+      if (entry === undefined || entry === false) {
+        return [];
+      }
+
+      if (typeof entry === 'string') {
+        return [[name, [entry]]];
+      }
+
+      return [[name, Array.isArray(entry) ? entry : toIntake(entry)]];
+    }),
+  );
 }
 
 function nestFiles(directory: string, files: CreatedDirectory | undefined): CreatedDirectory {
