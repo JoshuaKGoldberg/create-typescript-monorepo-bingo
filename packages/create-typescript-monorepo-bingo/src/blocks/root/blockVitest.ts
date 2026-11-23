@@ -155,9 +155,10 @@ ${indent}}))`;
 import { readdirSync } from 'node:fs';
 import path from 'node:path';
 
-import { defaultExclude, defineConfig, type ViteUserConfigExport } from 'vitest/config';
+import { defaultExclude, defineConfig } from 'vitest/config';
 
-const config: ViteUserConfigExport = defineConfig({
+// Untyped, so this works with every Vitest version that has projects.
+const config = defineConfig({
   test: {
     coverage: {
       exclude: [...defaultExclude, ${coverageExclude}],

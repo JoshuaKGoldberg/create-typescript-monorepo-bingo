@@ -83,7 +83,10 @@ export const blockPnpmWorkspace = rootBase.createBlock({
           `${excluded.replace(':', ' catalog: ')} has different versions across packages, so it's left out of catalogs. Align them to catalog it.`,
       ),
       files: {
-        'pnpm-workspace.yaml': document.toString({ singleQuote: true }),
+        'pnpm-workspace.yaml': document.toString({
+          flowCollectionPadding: false,
+          singleQuote: true,
+        }),
       },
     };
   },
@@ -186,7 +189,8 @@ function setDeep(document: Document, path: string[], value: unknown) {
     for (const [key, child] of Object.entries(value)) {
       setDeep(document, [...path, key], child);
     }
-  } else {
+  } else if (!document.hasIn(path)) {
+    // Settings the repository already has, like a build permission, are its own.
     document.setIn(path, value);
   }
 }

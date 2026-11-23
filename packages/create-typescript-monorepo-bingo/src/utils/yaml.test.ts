@@ -45,25 +45,76 @@ jobs:
 `);
   });
 
-  it('keeps keys it does not produce and adds new ones in sorted position', () => {
+  it('adds jobs an existing workflow is missing, changing nothing else', () => {
     const existing = `jobs:
   a:
     name: A
 
   c:
-    name: C
+    name: Custom C # ours
 `;
 
-    expect(formatYamlFile({ jobs: { b: { name: 'B' }, c: { name: 'C' } } }, existing)).toBe(`jobs:
+    expect(
+      formatYamlFile({ jobs: { b: { name: 'B' }, c: { name: 'C' } } }, existing, {
+        workflow: true,
+      }),
+    ).toBe(`jobs:
   a:
     name: A
 
+  c:
+    name: Custom C # ours
+
   b:
     name: B
-
-  c:
-    name: C
 `);
+  });
+
+  it('keeps the Node.js versions matrix of jobs it finds in line with engines', () => {
+    const existing = `jobs:
+  test_node:
+    runs-on: [self-hosted]
+    strategy:
+      matrix:
+        node-version:
+          - 20
+          - 22
+        os: [ubuntu-latest]
+`;
+
+    expect(
+      formatYamlFile(
+        {
+          jobs: {
+            'test-node': {
+              strategy: { matrix: { 'node-version': [22, 24], os: ['macos-latest'] } },
+            },
+          },
+        },
+        existing,
+        { workflow: true },
+      ),
+    ).toBe(`jobs:
+  test_node:
+    runs-on: [self-hosted]
+    strategy:
+      matrix:
+        node-version:
+          - 22
+          - 24
+        os: [ubuntu-latest]
+`);
+  });
+
+  it('keeps other existing YAML files as they are', () => {
+    const existing = 'name: Setup # ours\nruns:\n  using: composite\n';
+    expect(formatYamlFile({ name: 'Setup', inputs: {} }, existing)).toBe(existing);
+  });
+
+  it('names the file it cannot parse', () => {
+    expect(() => formatYamlFile({}, 'a: [', { name: 'ci.yaml', workflow: true })).toThrow(
+      /Could not parse ci\.yaml/,
+    );
   });
 
   it('keeps hand-written jobs in an existing workflow', () => {
@@ -103,11 +154,5 @@ jobs:
         { workflow: true },
       ),
     ).toBe(existing);
-  });
-
-  it('unions scalar sequences', () => {
-    expect(
-      formatYamlFile({ branches: ['main', 'next'] }, 'branches:\n  - main\n  - release\n'),
-    ).toBe('branches:\n  - main\n  - release\n  - next\n');
   });
 });

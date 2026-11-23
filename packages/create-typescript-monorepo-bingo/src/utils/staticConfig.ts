@@ -81,9 +81,24 @@ export type StaticObject = Record<string, StaticValue>;
 
 export interface ESLintIgnoresSource {
   /**
-   * Source lines of the array's elements, including any comments between them.
+   * The array's source between its brackets, with every entry and comment as written.
    */
-  lines: string[];
+  inner: string;
+
+  /**
+   * Where, in `inner`, new entries go: after the last existing entry and any comment on
+   * the rest of its line.
+   */
+  insertAt: number;
+
+  /**
+   * Where, in `inner`, the last existing entry needs a comma, if it has none.
+   */
+  needsCommaAt?: number;
+
+  /**
+   * The string literal entries.
+   */
   values: string[];
 }
 
@@ -98,7 +113,7 @@ export function readESLintIgnoresWithSource(
     return undefined;
   }
 
-  const { errors, program } = parseSync('eslint.config.ts', sourceText);
+  const { comments, errors, program } = parseSync('eslint.config.ts', sourceText);
   if (errors.length) {
     return undefined;
   }
@@ -126,17 +141,29 @@ export function readESLintIgnoresWithSource(
     }
 
     const values: string[] = [];
-    for (const element of value.elements as (AstNode | null)[]) {
+    let lastEnd = value.start + 1;
+    for (const element of value.elements as ((AstNode & { end: number }) | null)[]) {
       if (element?.type === 'Literal' && typeof element.value === 'string') {
         values.push(element.value);
       }
+      if (element) {
+        lastEnd = element.end;
+      }
     }
 
-    const inner = sourceText.slice(value.start + 1, value.end - 1);
+    const offset = value.start + 1;
+    const lineEnd = sourceText.indexOf('\n', lastEnd);
+    const restOfLine = lineEnd === -1 || lineEnd > value.end - 1 ? value.end - 1 : lineEnd;
+    const sameLineComments = (comments as unknown as { end: number; start: number }[]).filter(
+      (comment) => comment.start >= lastEnd && comment.start < restOfLine,
+    );
+    const insertAt = Math.max(restOfLine, ...sameLineComments.map((comment) => comment.end));
+    const beforeComment = sourceText.slice(lastEnd, sameLineComments[0]?.start ?? restOfLine);
+
     found = {
-      lines: inner.includes('\n')
-        ? inner.split('\n').filter((line) => line.trim())
-        : values.map((ignore) => `'${ignore}',`),
+      inner: sourceText.slice(offset, value.end - 1),
+      insertAt: lastEnd === offset ? 0 : insertAt - offset,
+      ...(lastEnd !== offset && !beforeComment.includes(',') && { needsCommaAt: lastEnd - offset }),
       values,
     };
   });
@@ -308,8 +335,13 @@ export interface ESLintExtras {
   imports: string[];
 
   /**
+   * Comments directly above \`export default\`.
+   */
+  exportComments: string[];
+
+  /**
    * Modules whose CTM import is replaced by the repository's own import of them,
-   * because it declares the same name (for example, adding \`globalIgnores\`).
+   * because it declares the same name (for example, adding `globalIgnores`).
    */
   replacedImports: string[];
 
@@ -367,6 +399,7 @@ export function readESLintExtras(
 
   const imports: string[] = [];
   const statements: string[] = [];
+  const exportComments: string[] = [];
   const declaredNames = new Set<string>();
   let previousStatementEnd = firstStart;
 
@@ -383,7 +416,9 @@ export function readESLintExtras(
           declaredNames.add(name);
         }
       }
-    } else if (node !== exported && node !== configDeclaration) {
+    } else if (node === exported) {
+      exportComments.push(...comments);
+    } else if (node !== configDeclaration) {
       statements.push(text);
     }
   }
@@ -413,7 +448,7 @@ export function readESLintExtras(
   const trailing =
     container && args.length ? getComments(sourceText.slice(previousEnd, container.end - 1)) : [];
 
-  return { configs, header, imports, replacedImports, statements, trailing };
+  return { configs, exportComments, header, imports, replacedImports, statements, trailing };
 }
 
 function getImportedNames(node: AstNode): string[] {

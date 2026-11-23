@@ -226,6 +226,7 @@ export const blockChangesets = rootBase.createBlock({
               workflow,
               props.existingWorkflow,
               {
+                name: `.github/workflows/release.${options.workflowExtension ?? 'yaml'}`,
                 workflow: true,
               },
             ),
@@ -244,7 +245,7 @@ function findOtherReleaseTool(
   changesetConfig: string | undefined,
   releaseWorkflow: string | undefined,
 ): string | undefined {
-  if (changesetConfig !== undefined) {
+  if (changesetConfig !== undefined && releaseWorkflow === undefined) {
     return undefined;
   }
 
@@ -265,7 +266,9 @@ function findOtherReleaseTool(
     return 'nx release';
   }
 
-  return releaseWorkflow !== undefined && !releaseWorkflow.includes('changesets/action')
+  // CTM's release workflow uses changesets/action's sub-actions; a workflow without them,
+  // including one using the classic all-in-one changesets/action, is the repository's own.
+  return releaseWorkflow !== undefined && !releaseWorkflow.includes('changesets/action/select-mode')
     ? 'its own release workflow'
     : undefined;
 }

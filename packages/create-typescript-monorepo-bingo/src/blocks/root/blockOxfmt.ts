@@ -20,7 +20,7 @@ import { blockVSCode } from './blockVSCode.ts';
 const baseIgnorePatterns = ['.all-contributorsrc', '**/CHANGELOG.md', 'coverage', 'pnpm-lock.yaml'];
 
 /**
- * Owns \`oxfmt.config.ts\`, unless the repository uses Prettier.
+ * Owns `oxfmt.config.ts`, unless the repository uses Prettier.
  * Settings and ignore patterns in an existing config are kept.
  */
 export const blockOxfmt = rootBase.createBlock({
@@ -42,7 +42,14 @@ export const blockOxfmt = rootBase.createBlock({
   },
   produce({ options, props }) {
     if (options.formatter === 'prettier') {
-      return {};
+      return {
+        extensions: [
+          blockRootPackageJson({
+            devDependencies: pinned('prettier'),
+            scripts: { format: 'prettier --write .' },
+          }),
+        ],
+      };
     }
 
     const existing = readConfigObject(props.existing) ?? {};

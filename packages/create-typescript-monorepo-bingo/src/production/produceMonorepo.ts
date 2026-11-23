@@ -126,7 +126,7 @@ function produceMonorepoOnce({
 
   return {
     ...creation,
-    scripts: [...creation.scripts, ...createFormatScripts(options, creation)],
+    scripts: [...creation.scripts, ...createFormatScripts(options, creation, files)],
   };
 }
 
@@ -238,8 +238,15 @@ function withoutExtensions<Options extends object>(
 /**
  * Formats the files CTM wrote, and only those, with the repository's formatter.
  */
-function createFormatScripts(options: RootOptions, creation: Partial<Creation>) {
-  const files = listFiles(creation.files ?? {});
+function createFormatScripts(
+  options: RootOptions,
+  creation: Partial<Creation>,
+  existing: IntakeDirectory | undefined,
+) {
+  // Files CTM wrote back unchanged are the repository's, and keep their formatting.
+  const files = listFiles(creation.files ?? {}).filter(
+    (file) => readText(existing, file) !== readCreated(creation.files, file),
+  );
   if (!files.length) {
     return [];
   }
@@ -264,4 +271,12 @@ function listFiles(directory: CreatedDirectory, prefix = ''): string[] {
       ? [`${prefix}${name}`]
       : listFiles(entry, `${prefix}${name}/`);
   });
+}
+
+function readCreated(directory: CreatedDirectory | undefined, filePath: string) {
+  let current: unknown = directory;
+  for (const segment of filePath.split('/')) {
+    current = (current as Record<string, unknown> | undefined)?.[segment];
+  }
+  return Array.isArray(current) ? (current[0] as string) : (current as string | undefined);
 }

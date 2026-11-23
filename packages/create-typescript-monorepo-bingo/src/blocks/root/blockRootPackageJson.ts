@@ -38,13 +38,14 @@ export const blockRootPackageJson = rootBase.createBlock({
       delete existingDevDependencies[removed];
     }
 
-    const { catalogEntries, dependencies } = resolveDependencies(
+    const { catalogEntries, dependencies: resolved } = resolveDependencies(
       // Root-only devDependencies aren't cataloged in default mode: they're declared once.
       options,
       'devDependencies',
       existingDevDependencies,
       props.devDependencies,
     );
+    const dependencies = alignCompanions(existingDevDependencies, resolved);
 
     const packageJson = {
       ...(props.existing === undefined
@@ -59,7 +60,8 @@ export const blockRootPackageJson = rootBase.createBlock({
           }
         : existing),
       private: true,
-      ...props.properties,
+      // Tool settings, like lint-staged and simple-git-hooks, only fill in what's missing.
+      ...deepWithDefaults(existing, props.properties ?? {}),
       scripts: sortKeys(mergeScripts(existing.scripts as Record<string, string>, props.scripts)),
       devDependencies: sortKeys(dependencies),
       packageManager: getPackageManager(existing.packageManager, options.pnpm ?? defaults.pnpm),
@@ -122,4 +124,52 @@ function getPackageManager(existing: unknown, version: string) {
   }
 
   return `pnpm@${version}`;
+}
+
+function deepWithDefaults(
+  existing: Record<string, unknown>,
+  defaults: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(defaults).map(([key, value]) => {
+      const current = existing[key];
+      if (current === undefined) {
+        return [key, value];
+      }
+
+      return [key, isObject(current) && isObject(value) ? { ...value, ...current } : current];
+    }),
+  );
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Packages released together with another, which must match its version.
+ */
+const companions: Record<string, string> = {
+  '@eslint/js': 'eslint',
+  '@vitest/coverage-v8': 'vitest',
+};
+
+/**
+ * When CTM adds a companion package, like `@vitest/coverage-v8`, next to a core package the
+ * repository already has, like vitest, it gets the core package's version rather than CTM's.
+ */
+function alignCompanions(existing: Dependencies, resolved: Dependencies): Dependencies {
+  const aligned = { ...resolved };
+  for (const [companion, core] of Object.entries(companions)) {
+    const coreSpecifier = existing[core];
+    if (
+      companion in aligned &&
+      !(companion in existing) &&
+      coreSpecifier &&
+      !coreSpecifier.startsWith('catalog:')
+    ) {
+      aligned[companion] = coreSpecifier;
+    }
+  }
+  return aligned;
 }

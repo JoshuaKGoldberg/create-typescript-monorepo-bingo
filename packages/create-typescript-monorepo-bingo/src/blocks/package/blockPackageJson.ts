@@ -72,11 +72,12 @@ export const blockPackageJson = packageBase.createBlock({
     }
 
     const existingScripts = existing.scripts as Record<string, string> | undefined;
+    // A package's own scripts win; a task runner only adds the ones it needs.
     const scripts = usesTaskRunner(options)
       ? {
-          ...existingScripts,
           build: 'tsdown',
           test: `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}${options.vitestConfig ?? 'vitest.config.ts'} --project ${pkg.directory.split('/').pop() ?? pkg.name}`,
+          ...existingScripts,
         }
       : existingScripts;
 
@@ -115,9 +116,10 @@ export const blockPackageJson = packageBase.createBlock({
       },
       ...resolved,
       ...(scripts && { scripts: sortKeys(scripts) }),
+      // A package's own engines.node is part of what it publishes, so it's kept.
       engines: {
-        ...(base.engines as object | undefined),
         node: options.nodeEngines ?? defaults.nodeEngines,
+        ...(base.engines as object | undefined),
       },
     };
 

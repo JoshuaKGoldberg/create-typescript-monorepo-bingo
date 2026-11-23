@@ -292,7 +292,7 @@ async function produce(directory: string, step: Step) {
 }
 
 /**
- * Finds built declaration files with more \`any\` types than their package's sources,
+ * Finds built declaration files with more `any` types than their package's sources,
  * which tsdown can emit silently when a referenced package's types weren't built first.
  */
 async function findAnyInDeclarations(directory: string) {

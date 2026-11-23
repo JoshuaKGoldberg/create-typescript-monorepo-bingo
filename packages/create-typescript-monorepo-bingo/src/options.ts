@@ -33,8 +33,8 @@ export const taskRunners = ['none', 'pnpm', 'turbo', 'nx'] as const;
 export type TaskRunner = (typeof taskRunners)[number];
 
 /**
- * Creates a schema for one of several strings. bingo's CLI parses \`--flag value\` for
- * unions of literals, but not for \`z.enum\`, which it only reads as \`--flag=value\`.
+ * Creates a schema for one of several strings. bingo's CLI parses `--flag value` for
+ * unions of literals, but not for `z.enum`, which it only reads as `--flag=value`.
  */
 function literalUnion<const Values extends readonly [string, string, ...string[]]>(values: Values) {
   const [first, second, ...rest] = values.map((value) => z.literal(value));

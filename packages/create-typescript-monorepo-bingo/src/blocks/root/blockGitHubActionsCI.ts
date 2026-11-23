@@ -128,7 +128,10 @@ export const blockGitHubActionsCI = rootBase.createBlock({
                 ),
               },
               props.existing,
-              { workflow: true },
+              {
+                name: `.github/workflows/ci.${options.workflowExtension ?? 'yaml'}`,
+                workflow: true,
+              },
             ).replace('pull_request: null', 'pull_request: ~'),
           },
         },

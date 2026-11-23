@@ -92,7 +92,7 @@ export function usesTaskRunner(options: RootOptions): boolean {
 }
 
 /**
- * Gets the directories that hold workspace packages, such as \`packages\` and \`apps\`.
+ * Gets the directories that hold workspace packages, such as `packages` and `apps`.
  */
 export function getPackageParents(options: RootOptions): string[] {
   const parents = new Set(
@@ -105,7 +105,7 @@ export function getPackageParents(options: RootOptions): string[] {
 }
 
 /**
- * Gets glob patterns for an output directory, like \`dist\`, in every package.
+ * Gets glob patterns for an output directory, like `dist`, in every package.
  */
 export function getPackageGlobs(options: RootOptions, suffix: string): string[] {
   return getPackageParents(options).map((parent) => `${parent}/*/${suffix}`);

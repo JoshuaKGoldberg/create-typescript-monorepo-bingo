@@ -64,8 +64,8 @@ describe(readESLintIgnoresWithSource, () => {
   },
   { files: ['**/*.md'], ignores: ['CHANGELOG.md'] },
 );`),
-    ).toEqual({
-      lines: ["      'coverage',", '      // Remove after #527', "      'packages/*/bin/*.js',"],
+    ).toMatchObject({
+      inner: "\n      'coverage',\n      // Remove after #527\n      'packages/*/bin/*.js',\n    ",
       values: ['coverage', 'packages/*/bin/*.js'],
     });
   });

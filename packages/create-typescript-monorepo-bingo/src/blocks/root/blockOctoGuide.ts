@@ -49,7 +49,10 @@ export const blockOctoGuide = rootBase.createBlock({
                 },
               },
               props.existing,
-              { workflow: true },
+              {
+                name: `.github/workflows/octoguide.${options.workflowExtension ?? 'yaml'}`,
+                workflow: true,
+              },
             ),
           },
         },

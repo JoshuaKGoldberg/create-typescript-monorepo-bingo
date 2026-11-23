@@ -18,7 +18,7 @@ export const template = createTemplate({
 });
 
 /**
- * Creates a config file for the template, such as a \`create-typescript-monorepo-bingo.config.ts\`
- * whose \`options\` override what's inferred, for example a package's \`kind\`.
+ * Creates a config file for the template, such as a `create-typescript-monorepo-bingo.config.ts`
+ * whose `options` override what's inferred, for example a package's `kind`.
  */
 export const createConfig: typeof template.createConfig = template.createConfig;

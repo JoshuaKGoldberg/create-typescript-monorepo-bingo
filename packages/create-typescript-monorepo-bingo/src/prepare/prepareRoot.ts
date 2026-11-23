@@ -470,7 +470,7 @@ function assertMonorepoRoot(manifest: PackageManifest | undefined) {
   const root = manifest as (PackageManifest & Record<string, unknown>) | undefined;
   if (root && !root.private && (root.main || root.exports || root.bin || root.module)) {
     throw new Error(
-      `The root package.json is a published package${root.name ? ` (${root.name})` : ''}. create-typescript-monorepo-bingo manages monorepos with a private root and packages in workspace directories; for a single-package repository, see create-typescript-app.`,
+      `The root package.json is a published package${root.name ? ` (${root.name})` : ''}. create-typescript-monorepo-bingo manages monorepos with a private root and packages in workspace directories. If the root isn't published, add "private": true to it; for a single-package repository, see create-typescript-app.`,
     );
   }
 }
@@ -523,8 +523,14 @@ function inferFormatter(
  * Infers the root Vitest config's file name, when it isn't vitest.config.ts.
  */
 function inferVitestConfig(files: IntakeDirectory): Partial<RootOptions> {
-  const name = ['vitest.config.mts', 'vitest.config.js', 'vitest.config.mjs'].find((candidate) =>
-    getEntry(files, candidate),
-  );
+  const name = [
+    'vitest.config.mts',
+    'vitest.config.js',
+    'vitest.config.mjs',
+    'vite.config.ts',
+    'vite.config.mts',
+    'vite.config.js',
+    'vite.config.mjs',
+  ].find((candidate) => getEntry(files, candidate));
   return name ? { vitestConfig: name } : {};
 }

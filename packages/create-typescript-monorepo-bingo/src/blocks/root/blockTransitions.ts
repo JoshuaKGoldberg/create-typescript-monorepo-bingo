@@ -56,9 +56,9 @@ export const blockTransitions = rootBase.createBlock({
             },
             {
               // CI installs with a frozen lockfile, so the transition's own install can't
-              // update it; this does, then formats what it changed.
+              // update it; this does.
               name: 'Update Lockfile',
-              run: 'pnpm install --no-frozen-lockfile && pnpm format',
+              run: 'pnpm install --no-frozen-lockfile',
             },
             {
               name: 'Create Token',
@@ -95,6 +95,7 @@ export const blockTransitions = rootBase.createBlock({
         '.github': {
           workflows: {
             [getWorkflowPath(options, 'transitions')]: formatYamlFile(workflow, props.existing, {
+              name: `.github/workflows/transitions.${options.workflowExtension ?? 'yaml'}`,
               workflow: true,
             }).replace('workflow_dispatch: null', 'workflow_dispatch: ~'),
           },

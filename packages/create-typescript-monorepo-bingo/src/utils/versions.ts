@@ -54,9 +54,9 @@ export function parseNpmAlias(specifier: string): NpmAlias | undefined {
  * Picks the specifier to write for a dependency, given what's on disk and what CTM pins.
  * A dependency the repository already has keeps its specifier: upgrades are Renovate's job,
  * and CTM never downgrades or narrows a range. The one exception is switching to a
- * different \`npm:\` alias target, like \`typescript\` becoming the TypeScript 6 wrapper,
- * which happens only from a version (or \`^\`/\`~\` range) of the same major version.
- * An alias to the dependency's own name, like \`typescript: npm:typescript@^5\`, counts as
+ * different `npm:` alias target, like `typescript` becoming the TypeScript 6 wrapper,
+ * which happens only from a version (or `^`/`~` range) of the same major version.
+ * An alias to the dependency's own name, like `typescript: npm:typescript@^5`, counts as
  * a plain range.
  */
 export function resolveSpecifier(

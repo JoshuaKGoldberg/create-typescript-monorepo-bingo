@@ -85,7 +85,7 @@ export default config;
 `;
 
 /**
- * Owns the private \`@&lt;scope>/build\` package, with the shared tsconfig and tsdown base,
+ * Owns the private `@&lt;scope>/build` package, with the shared tsconfig and tsdown base,
  * as well as the root tsdown config and the TypeScript dependencies.
  */
 export const blockBuildPackage = rootBase.createBlock({
@@ -101,6 +101,7 @@ export const blockBuildPackage = rootBase.createBlock({
         tsconfigBase: readText(files, 'packages/build/tsconfig.base.json'),
         tsdownBase: readText(files, 'packages/build/src/tsdown/base.ts'),
         tsdownIndex: readText(files, 'packages/build/src/tsdown/index.ts'),
+        rootTsdown: readText(files, 'tsdown.config.ts'),
       }).filter(([, text]) => text !== undefined),
     );
     return { existing };
@@ -114,6 +115,7 @@ export const blockBuildPackage = rootBase.createBlock({
         tsconfigBase: z.string().optional(),
         tsdownBase: z.string().optional(),
         tsdownIndex: z.string().optional(),
+        rootTsdown: z.string().optional(),
       })
       .optional(),
   },
@@ -247,7 +249,8 @@ export const blockBuildPackage = rootBase.createBlock({
             ),
           },
         },
-        'tsdown.config.ts': rootTsdownConfig,
+        // An existing root config is the repository's, like each package's own.
+        ...(existingTexts.rootTsdown === undefined && { 'tsdown.config.ts': rootTsdownConfig }),
       },
     };
   },

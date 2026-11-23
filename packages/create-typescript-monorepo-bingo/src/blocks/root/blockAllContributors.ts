@@ -80,7 +80,10 @@ export const blockAllContributors = rootBase.createBlock({
                 },
               },
               props.existingWorkflow,
-              { workflow: true },
+              {
+                name: `.github/workflows/contributors.${options.workflowExtension ?? 'yaml'}`,
+                workflow: true,
+              },
             ),
           },
         },

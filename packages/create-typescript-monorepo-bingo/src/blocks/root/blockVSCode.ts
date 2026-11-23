@@ -44,8 +44,8 @@ export const blockVSCode = rootBase.createBlock({
     const settings = sortKeys({
       'editor.formatOnSave': true,
       'editor.rulers': [100],
-      ...parseJsonText(texts.settings),
       ...props.settings,
+      ...parseJsonText(texts.settings),
     });
     const launch = texts.launch === undefined ? props.launch : parseJsonText(texts.launch);
 

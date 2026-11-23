@@ -42,7 +42,7 @@ export const blockESLint = rootBase.createBlock({
     const existingIgnores = readESLintIgnoresWithSource(existing);
     const extras = readESLintExtras(
       existing,
-      createESLintConfig([], options.workflowExtension ?? defaults.workflowExtension),
+      createESLintConfig('', options.workflowExtension ?? defaults.workflowExtension),
     );
     return {
       ...(alternate && { alternate }),
@@ -59,6 +59,7 @@ export const blockESLint = rootBase.createBlock({
     extras: z
       .object({
         configs: z.array(z.string()),
+        exportComments: z.array(z.string()),
         header: z.array(z.string()),
         imports: z.array(z.string()),
         replacedImports: z.array(z.string()),
@@ -67,7 +68,12 @@ export const blockESLint = rootBase.createBlock({
       })
       .optional(),
     existingIgnores: z
-      .object({ lines: z.array(z.string()), values: z.array(z.string()) })
+      .object({
+        inner: z.string(),
+        insertAt: z.number(),
+        needsCommaAt: z.number().optional(),
+        values: z.array(z.string()),
+      })
       .optional(),
     ignores: z.array(z.string()).optional(),
     lintPrebuildSteps: z.array(z.string()).optional(),
@@ -80,15 +86,15 @@ export const blockESLint = rootBase.createBlock({
       ...(props.ignores ?? []),
     ]);
 
-    // Existing entries keep their source lines, comments included; new ones are appended.
+    // Existing entries and comments stay exactly as written; new ones go after the last entry.
     const existingValues = new Set(props.existingIgnores?.values);
-    const ignoreLines = [
-      ...(props.existingIgnores?.lines.map((line) => `      ${withTrailingComma(line.trim())}`) ??
-        []),
-      ...ignores
-        .filter((ignore) => !existingValues.has(ignore))
-        .map((ignore) => `      '${ignore.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}',`),
-    ];
+    const quote = (ignore: string) => `'${ignore.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+    const added = ignores.filter((ignore) => !existingValues.has(ignore)).map(quote);
+    const existingIgnores = props.existingIgnores;
+    const ignoresText =
+      existingIgnores && existingIgnores.insertAt > 0
+        ? insertIgnores(existingIgnores, added)
+        : `\n${added.map((ignore) => `      ${ignore},`).join('\n')}\n    `;
     const workflowExtension = options.workflowExtension ?? defaults.workflowExtension;
     const prebuildSteps: WorkflowStep[] = (props.lintPrebuildSteps ?? []).map((run) => ({ run }));
 
@@ -152,7 +158,7 @@ export const blockESLint = rootBase.createBlock({
       files: {
         // A config that doesn't parse is left as it is, rather than lose what can't be read.
         ...(!props.unparseable && {
-          'eslint.config.ts': createESLintConfig(ignoreLines, workflowExtension, props.extras),
+          'eslint.config.ts': createESLintConfig(ignoresText, workflowExtension, props.extras),
         }),
       },
     });
@@ -177,26 +183,16 @@ const ownImports = [
   ['typescript-eslint', "import tseslint from 'typescript-eslint';"],
 ] as const;
 
-function withTrailingComma(line: string) {
-  if (line.startsWith('//') || line.startsWith('/*')) {
-    return line;
-  }
-
-  // A comment after an entry, like \`'generated', // generated code\`, keeps the comma before it.
-  const match = /^(.*?['"\]}])(\s*(?:\/\/|\/\*).*)?$/.exec(line);
-  const [, code = line, comment = ''] = match ?? [];
-  return code.endsWith(',') ? line : `${code},${comment}`;
-}
-
 /**
  * Creates CTM's flat ESLint config. Config entries and imports a repository added are
  * kept after CTM's own; edits inside CTM's own entries are replaced on transition.
  */
 function createESLintConfig(
-  ignoreLines: string[],
+  ignoresText: string,
   workflowExtension: string,
   extras?: {
     configs: string[];
+    exportComments: string[];
     header: string[];
     imports: string[];
     replacedImports: string[];
@@ -211,11 +207,9 @@ function createESLintConfig(
     .join(
       '',
     )}${extras?.imports.length ? `${extras.imports.join('\n')}\n` : ''}${extras?.statements.length ? `\n${extras.statements.join('\n\n')}\n` : ''}
-export default defineConfig(
+${extras?.exportComments.length ? `${extras.exportComments.join('\n')}\n` : ''}export default defineConfig(
   {
-    ignores: [
-${ignoreLines.join('\n')}
-    ],
+    ignores: [${ignoresText}],
   },
   { linterOptions: { reportUnusedDisableDirectives: 'error' } },
   {
@@ -315,4 +309,21 @@ ${ignoreLines.join('\n')}
   },${extras?.configs.length ? `\n${extras.configs.map((config) => `  ${config},`).join('\n')}` : ''}${extras?.trailing.length ? `\n  ${extras.trailing.join('\n  ')}` : ''}
 );
 `;
+}
+
+function insertIgnores(
+  { inner, insertAt, needsCommaAt }: { inner: string; insertAt: number; needsCommaAt?: number },
+  added: string[],
+) {
+  if (!added.length) {
+    return inner;
+  }
+
+  const withComma =
+    needsCommaAt === undefined
+      ? inner
+      : `${inner.slice(0, needsCommaAt)},${inner.slice(needsCommaAt)}`;
+  const at = insertAt + (needsCommaAt === undefined ? 0 : 1);
+  const insertion = added.map((ignore) => `\n      ${ignore},`).join('');
+  return `${withComma.slice(0, at)}${insertion}${withComma.slice(at)}`;
 }
