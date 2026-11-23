@@ -73,6 +73,16 @@ export const blockPackageJson = packageBase.createBlock({
     }
 
     const sharedHomepage = getSharedHomepage(options.packages ?? [], pkg);
+    // Where every other library has a homepage of its own, as lint rules may require,
+    // a new package gets its directory on GitHub.
+    const otherLibraries = (options.packages ?? []).filter(
+      (other) => other.kind === 'library' && other.directory !== pkg.directory,
+    );
+    const homepage =
+      sharedHomepage ??
+      (otherLibraries.length && otherLibraries.every((other) => other.homepage)
+        ? `${getRepositoryUrl(options)}/tree/HEAD/${pkg.directory}#readme`
+        : undefined);
     const existingScripts = existing.scripts as Record<string, string> | undefined;
     // A package's own scripts win; a task runner only adds the ones it needs.
     // CTM's Vitest config names projects by folder, or by path where folder names repeat.
@@ -107,7 +117,7 @@ export const blockPackageJson = packageBase.createBlock({
           license: 'MIT',
           author: getAuthor(options),
           // A homepage every other library shares, like a project website, is shared too.
-          ...(sharedHomepage && { homepage: sharedHomepage }),
+          ...(homepage && { homepage }),
           sideEffects: false,
           type: 'module',
           exports: {

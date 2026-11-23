@@ -105,15 +105,22 @@ export const blockBuildPackage = rootBase.createBlock({
         tsdownBase: readText(files, 'packages/build/src/tsdown/base.ts'),
         tsdownIndex: readText(files, 'packages/build/src/tsdown/index.ts'),
         rootTsdown: readText(files, 'tsdown.config.ts'),
+        rootTSConfig: readText(files, 'tsconfig.json'),
       }).filter(([, text]) => text !== undefined),
     );
     const rootManifest = parseJsonText(readText(files, 'package.json'));
     const rootTsdownSpecifier = [rootManifest.devDependencies, rootManifest.dependencies]
       .map((dependencies) => (dependencies as Record<string, string> | undefined)?.tsdown)
       .find((specifier) => specifier !== undefined);
-    return { existing, ...(rootTsdownSpecifier && { rootTsdownSpecifier }) };
+    const rootBuild = (rootManifest.scripts as Record<string, string> | undefined)?.build;
+    return {
+      existing,
+      ...(rootBuild !== undefined && { rootBuild }),
+      ...(rootTsdownSpecifier && { rootTsdownSpecifier }),
+    };
   },
   props: {
+    rootBuild: z.string().optional(),
     rootTsdownSpecifier: z.string().optional(),
     existing: z
       .object({
@@ -124,6 +131,7 @@ export const blockBuildPackage = rootBase.createBlock({
         tsdownBase: z.string().optional(),
         tsdownIndex: z.string().optional(),
         rootTsdown: z.string().optional(),
+        rootTSConfig: z.string().optional(),
       })
       .optional(),
   },
@@ -146,6 +154,19 @@ export const blockBuildPackage = rootBase.createBlock({
       (pkg) => pkg.kind === 'library' && pkg.tsdownWorkspaceReady === false,
     );
     const workspaceReady = !unready.length;
+    // A root tsdown config only helps when the root build runs tsdown: an existing build,
+    // like nx run-many, or a task runner's, builds packages with their own configs.
+    const writesRootTsdown =
+      existingTexts.rootTsdown === undefined &&
+      workspaceReady &&
+      !usesTaskRunner(options) &&
+      (props.rootBuild === undefined || /\btsdown\b/.test(props.rootBuild));
+    // The root depends on the build package only when something there uses it.
+    const rootUsesBuildPackage =
+      existingTexts.rootTSConfig === undefined ||
+      [existingTexts.rootTSConfig, existingTexts.rootTsdown].some((text) =>
+        text?.includes(`${name}/`),
+      );
     const { catalogEntries, dependencies } = resolveDependencies(
       options,
       'dependencies',
@@ -224,7 +245,7 @@ export const blockBuildPackage = rootBase.createBlock({
               publint: pin('publint'),
             }),
             '@types/node': pin('@types/node'),
-            [name]: 'workspace:^',
+            ...(rootUsesBuildPackage && { [name]: 'workspace:^' }),
             tsdown: pin('tsdown'),
             typescript: typescriptSpecifier(),
             [typescript7Alias]: typescript7Specifier(),
@@ -291,8 +312,7 @@ export const blockBuildPackage = rootBase.createBlock({
           },
         },
         // An existing root config is the repository's, like each package's own.
-        ...(existingTexts.rootTsdown === undefined &&
-          workspaceReady && { 'tsdown.config.ts': rootTsdownConfig }),
+        ...(writesRootTsdown && { 'tsdown.config.ts': rootTsdownConfig }),
       },
     };
   },

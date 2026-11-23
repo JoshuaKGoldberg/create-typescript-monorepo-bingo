@@ -107,8 +107,8 @@ export const blockGitignore = rootBase.createBlock({
 });
 
 /**
- * Normalizes an ignore pattern for comparison: \`dist\`, \`dist/\`, \`**\/dist\` and
- * \`**\/dist/\` are the same.
+ * Normalizes an ignore pattern for comparison: `dist`, `dist/`, `**\/dist` and
+ * `**\/dist/` are the same.
  */
 function normalizeIgnore(pattern: string) {
   return pattern.replace(/^\*\*\//, '').replace(/\/$/, '');

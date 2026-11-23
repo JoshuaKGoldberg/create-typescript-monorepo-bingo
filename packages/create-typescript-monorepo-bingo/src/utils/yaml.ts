@@ -201,13 +201,35 @@ function hasEquivalentJob(workflow: unknown, job: unknown, scripts: Record<strin
       steps.flatMap((step) => (step.uses ? [normalizeUses(step.uses)] : [])),
     );
     const existingRuns = new Set(
-      steps.flatMap((step) => (step.run ? [normalizeRun(step.run, scripts)] : [])),
+      steps.flatMap((step) =>
+        step.run
+          ? expandMatrix(step.run, existingJob).map((run) => normalizeRun(run, scripts))
+          : [],
+      ),
     );
     return (
       (distinctive.length > 0 && distinctive.every((uses) => existingActions.has(uses))) ||
       (runs.length > 0 && runs.every((run) => existingRuns.has(run)))
     );
   });
+}
+
+/**
+ * Expands a run's matrix references, so `pnpm ${{ matrix.task }}` with a task matrix of
+ * typecheck and lint counts as running `pnpm typecheck` and `pnpm lint`.
+ */
+function expandMatrix(run: string, job: unknown): string[] {
+  const strategy = isPlainObject(job) && isPlainObject(job.strategy) ? job.strategy : {};
+  const matrix = isPlainObject(strategy.matrix) ? strategy.matrix : {};
+  const match = /\$\{\{\s*matrix\.([\w-]+)\s*\}\}/.exec(run);
+  const values = match?.[1] === undefined ? undefined : matrix[match[1]];
+  if (!match || !Array.isArray(values)) {
+    return [run];
+  }
+
+  return values
+    .filter((value) => typeof value === 'string' || typeof value === 'number')
+    .flatMap((value) => expandMatrix(run.replace(match[0], String(value)), job));
 }
 
 function getSteps(job: unknown): { run?: string; uses?: string }[] {
@@ -234,8 +256,8 @@ function normalizeUses(uses: string) {
 }
 
 /**
- * Normalizes a command, expanding a pnpm script to what it runs, so \`pnpm typecheck\`
- * and \`pnpm exec tsc -b\` compare equal when the typecheck script is \`tsc -b\`.
+ * Normalizes a command, expanding a pnpm script to what it runs, so `pnpm typecheck`
+ * and `pnpm exec tsc -b` compare equal when the typecheck script is `tsc -b`.
  */
 function normalizeRun(run: string, scripts: Record<string, string>): string {
   const command = run.trim().replace(/^(?:pnpm (?:run |exec )?|npx )/, '');

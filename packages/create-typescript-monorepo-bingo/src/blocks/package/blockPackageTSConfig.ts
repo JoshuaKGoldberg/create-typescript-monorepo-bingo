@@ -47,10 +47,15 @@ export const blockPackageTSConfig = packageBase.createBlock({
         .filter((other) => other.kind === 'library')
         .map((other) => [other.name, other]),
     );
-    const computed = (pkg.workspaceDependencies ?? [])
-      .map((dependency) => libraries.get(dependency))
-      .filter((dependency) => dependency !== undefined)
-      .map((dependency) => relativeTo(pkg.directory, dependency.directory));
+    // A new package depends on the build package too, which tools like nx's TypeScript
+    // sync expect a reference for; existing packages keep their own references.
+    const buildPackage = (options.packages ?? []).find((other) => other.kind === 'build');
+    const computed = [
+      ...(props.existing === undefined && buildPackage ? [buildPackage] : []),
+      ...(pkg.workspaceDependencies ?? [])
+        .map((dependency) => libraries.get(dependency))
+        .filter((dependency) => dependency !== undefined),
+    ].map((dependency) => relativeTo(pkg.directory, dependency.directory));
 
     // Existing references keep their order; newly needed ones are appended.
     const existingPaths = (existing.references ?? []).map((reference) => reference.path);

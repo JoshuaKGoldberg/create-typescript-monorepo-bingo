@@ -387,7 +387,8 @@ function getWrittenSpecifier(
 }
 
 function getFirstPerson(manifest: PackageManifest | undefined) {
-  const person = manifest?.author ?? manifest?.contributors?.[0];
+  // Contributors aren't authors: without an author, packages fall back to the owner.
+  const person = manifest?.author;
   if (!person) {
     return undefined;
   }

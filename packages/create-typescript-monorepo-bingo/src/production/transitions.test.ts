@@ -996,9 +996,12 @@ export default config;
     const single = createRepository();
     setHomepage(single, 'packages/example', 'https://example.dev');
 
+    // Each sibling having a homepage of its own gives the new package its GitHub directory.
     expect(
       getFile(transition(single, { newPackage: 'second' }).files, 'packages/second/package.json'),
-    ).not.toContain('"homepage"');
+    ).toContain(
+      '"homepage": "https://github.com/example-org/example/tree/HEAD/packages/second#readme"',
+    );
 
     const named = createRepository();
     applyFiles(named, transition(named, { newPackage: 'second' }).files);
@@ -1017,7 +1020,7 @@ export default config;
 
     expect(
       getFile(transition(named, { newPackage: 'third' }).files, 'packages/third/package.json'),
-    ).not.toContain('"homepage"');
+    ).toContain('/tree/HEAD/packages/third#readme');
   });
 
   it("keeps a repository's own entry for test files when it doesn't use Vitest", () => {
@@ -1267,6 +1270,78 @@ describe('round 11 regressions', () => {
     expect(
       prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).recursiveBuild,
     ).toBe(expected);
+  });
+});
+
+describe('round 11 adoption regressions', () => {
+  it('references the build package from a new package', () => {
+    const files = createRepository();
+    const output = transition(files, { newPackage: 'second' }).files;
+
+    expect(getFile(output, 'packages/second/tsconfig.json')).toContain('"path": "../build"');
+    // Existing packages keep their own references.
+    expect(getFile(output, 'packages/example/tsconfig.json')).toBe(
+      getFile(files, 'packages/example/tsconfig.json'),
+    );
+  });
+
+  it("doesn't add a root tsdown config or build dependency a repository's own build doesn't use", () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['tsdown.config.ts'];
+    setFile(
+      files,
+      'tsconfig.json',
+      '{ "files": [], "references": [{ "path": "packages/example" }] }\n',
+    );
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.build = 'nx run-many -t build';
+    delete manifest.devDependencies['@example/build'];
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    const output = transition(files, { newPackage: 'second' }).files;
+
+    expect(getFile(output, 'tsdown.config.ts')).toBeUndefined();
+    expect(getFile(output, 'package.json')).not.toContain('"@example/build"');
+  });
+
+  it("doesn't use contributors as the author", () => {
+    const files = createRepository({ author: undefined });
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as Record<string, unknown>;
+    delete manifest.author;
+    manifest.contributors = [{ email: 'someone@example.com', name: 'Some One' }];
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    expect(prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).author).toBe(
+      undefined,
+    );
+  });
+
+  it("doesn't add a typecheck job a matrix step already runs", () => {
+    const files = createRepository();
+    setFile(
+      files,
+      '.github/workflows/ci.yaml',
+      `name: CI
+on: { pull_request: ~ }
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        task: [build, typecheck]
+    steps:
+      - uses: actions/checkout@v6
+      - run: pnpm \${{ matrix.task }}
+`,
+    );
+
+    const workflow = getFile(transition(files).files, '.github/workflows/ci.yaml') ?? '';
+
+    expect(workflow).not.toContain('type_check:');
+    expect(workflow).not.toContain('\n  build:');
   });
 });
 
