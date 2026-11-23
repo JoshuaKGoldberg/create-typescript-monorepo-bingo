@@ -60,7 +60,8 @@ export const blockRootTSConfig = rootBase.createBlock({
     const include = new Set([
       ...((existing.include as string[] | undefined) ?? [
         './*.config.ts',
-        ...getPackageGlobs(options, 'tsdown.config.ts').map((glob) => `./${glob}`),
+        // Package config files, like tsdown.config.ts, aren't in any package's tsconfig.
+        ...getPackageGlobs(options, '*.config.ts').map((glob) => `./${glob}`),
       ]),
       ...(props.include ?? []),
     ]);

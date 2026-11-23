@@ -102,7 +102,8 @@ export const blockVitest = rootBase.createBlock({
           devDependencies: pinned(
             '@types/node',
             '@vitest/coverage-v8',
-            'console-fail-test',
+            // CTM's own config sets it up; a repository's own config may not.
+            ...(props.unowned ? [] : ['console-fail-test' as const]),
             'vitest',
           ),
           scripts: usesTaskRunner(options)

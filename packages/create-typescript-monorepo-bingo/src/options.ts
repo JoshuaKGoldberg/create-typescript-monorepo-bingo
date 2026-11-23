@@ -91,6 +91,10 @@ export const rootOptionsShape = {
   taskRunner: literalUnion(taskRunners)
     .optional()
     .describe("task runner to orchestrate scripts: 'none', 'pnpm', 'turbo', or 'nx'"),
+  recursiveBuild: z
+    .boolean()
+    .optional()
+    .describe("whether the root build script runs each package's own build script"),
   testRunner: literalUnion(['vitest', 'other'] as const)
     .optional()
     .describe("'vitest', or 'other' for repositories that test with something else"),

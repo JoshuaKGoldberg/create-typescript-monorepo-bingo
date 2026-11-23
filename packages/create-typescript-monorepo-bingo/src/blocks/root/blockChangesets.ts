@@ -39,7 +39,11 @@ export const blockChangesets = rootBase.createBlock({
     );
     const existingReadme = readText(files, '.changeset/README.md');
     const otherReleaseTool = findOtherReleaseTool(files, existingConfig, existingWorkflow);
+    const rootScripts = parseJsonText(readText(files, 'package.json')).scripts as
+      | Record<string, string>
+      | undefined;
     return {
+      ...(rootScripts?.build !== undefined && { rootBuild: true }),
       ...(existingConfig && { existingConfig }),
       ...(otherReleaseTool && { otherReleaseTool }),
       ...(existingReadme && { existingReadme }),
@@ -48,6 +52,7 @@ export const blockChangesets = rootBase.createBlock({
   },
   props: {
     existingConfig: z.string().optional(),
+    rootBuild: z.boolean().optional(),
     otherReleaseTool: z.string().optional(),
     existingWorkflow: z.string().optional(),
     existingReadme: z.string().optional(),
@@ -148,7 +153,10 @@ export const blockChangesets = rootBase.createBlock({
             ...(options.packages?.some((pkg) => pkg.scripts?.includes('prebuild'))
               ? [{ name: 'Prebuild', run: 'pnpm run -r prebuild' }]
               : []),
-            { name: 'Build', run: 'pnpm build' },
+            // CTM's build package gives tsdown-built packages a root build script.
+            ...(props.rootBuild || options.packages?.some((pkg) => pkg.kind === 'library')
+              ? [{ name: 'Build', run: 'pnpm build' }]
+              : []),
             {
               name: 'Pack',
               uses: action('changesets/action', '/pack'),

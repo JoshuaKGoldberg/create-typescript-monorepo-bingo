@@ -90,11 +90,12 @@ export function prepareRoot(
     ...inferReleaseApp(files),
     ...(scope && { scope }),
     taskRunner: inferTaskRunner(files, workspace, rootManifest),
+    ...(recursivePnpm.test(rootManifest?.scripts?.build ?? '') && { recursiveBuild: true }),
     ...inferTitle(files),
     ...inferTypeScript7Alias(rootManifest, workspace),
     ...inferFormatter(files, rootManifest),
     ...inferVitestConfig(files),
-    ...inferTestRunner(rootManifest, workspacePackages),
+    ...inferTestRunner(files, rootManifest, workspacePackages),
     ...inferWorkflowExtension(files),
   };
 }
@@ -421,15 +422,12 @@ function inferTaskRunner(
     return 'nx';
   }
 
-  // A root that builds by running each package's script is using pnpm as its task runner.
-  const recursive = /\bpnpm (?:run )?(?:-r|--recursive|-F|--filter)\b/;
-  return workspace?.tasks ||
-    [manifest?.scripts?.build, manifest?.scripts?.test].some((script) =>
-      recursive.test(script ?? ''),
-    )
-    ? 'pnpm'
-    : 'none';
+  // A root that tests by running each package's script is using pnpm as its task runner.
+  // A recursive build alone isn't: CTM writes one for packages tsdown's workspace mode skips.
+  return workspace?.tasks || recursivePnpm.test(manifest?.scripts?.test ?? '') ? 'pnpm' : 'none';
 }
+
+const recursivePnpm = /\bpnpm\b[^&|;]*\s(?:-r|--recursive|-F|--filter)\b/;
 
 function inferTitle(files: IntakeDirectory): Partial<RootOptions> {
   const readme = readText(files, 'README.md');
@@ -594,13 +592,13 @@ function isTsdownWorkspaceReady(config: string | undefined) {
 
 /**
  * Infers whether a repository tests with Vitest. A task runner's test script, like
- * \`turbo run test\`, defers to the packages' own scripts and dependencies.
+ * `turbo run test`, defers to the packages' own scripts and dependencies.
  */
 function inferTestRunner(
+  files: IntakeDirectory,
   manifest: PackageManifest | undefined,
   packages: WorkspacePackage[],
 ): Partial<RootOptions> {
-  const test = manifest?.scripts?.test;
   const mentionsVitest = (candidate: PackageManifest | undefined) => {
     // Scripts are indexed by name, so a test script may not exist.
     const script: string | undefined = candidate?.scripts?.test;
@@ -609,17 +607,29 @@ function inferTestRunner(
     );
   };
 
-  if (test === undefined || mentionsVitest(manifest)) {
+  const test: string | undefined = manifest?.scripts?.test;
+  if (mentionsVitest(manifest)) {
     return {};
   }
 
-  const delegates = /\b(?:turbo|nx)\b|\bpnpm (?:run )?(?:-r|--recursive|-F|--filter)\b/.test(test);
-  if (delegates) {
-    const packageTests = packages.filter((pkg) => pkg.manifest.scripts?.test);
-    return packageTests.length === 0 || packages.some((pkg) => mentionsVitest(pkg.manifest))
-      ? {}
-      : { testRunner: 'other' };
+  // A root test script of its own, like node --test, is another test runner.
+  const delegates = /\b(?:turbo|nx|lerna)\b/.test(test ?? '') || recursivePnpm.test(test ?? '');
+  if (test !== undefined && !delegates) {
+    return { testRunner: 'other' };
   }
 
-  return { testRunner: 'other' };
+  if (
+    packages.some((pkg) => mentionsVitest(pkg.manifest)) ||
+    getEntry(files, 'vitest.config.ts') ||
+    inferVitestConfig(files).vitestConfig
+  ) {
+    return {};
+  }
+
+  // Packages testing with something else, or a repository CTM already manages without
+  // Vitest anywhere, as \`--testRunner other\` leaves it.
+  const managed = isOwnedFile(readText(files, 'eslint.config.ts'));
+  return packages.some((pkg) => pkg.manifest.scripts?.test) || managed
+    ? { testRunner: 'other' }
+    : {};
 }

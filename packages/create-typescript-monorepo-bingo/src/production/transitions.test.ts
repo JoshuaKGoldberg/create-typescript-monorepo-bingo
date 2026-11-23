@@ -61,6 +61,25 @@ function createRepository(options: Partial<RootOptions> = {}) {
 }
 
 /**
+ * Writes a transition's files over the existing ones and lists the paths it changed.
+ */
+function applyFiles(files: IntakeDirectory, created: CreatedDirectory | undefined, prefix = '') {
+  const changed: string[] = [];
+  for (const [name, entry] of Object.entries(created ?? {})) {
+    const path = `${prefix}${name}`;
+    if (typeof entry === 'string') {
+      if (getFile(files, path) !== entry) {
+        changed.push(path);
+        setFile(files, path, entry);
+      }
+    } else if (entry && !Array.isArray(entry)) {
+      changed.push(...applyFiles(files, entry, `${path}/`));
+    }
+  }
+  return changed;
+}
+
+/**
  * Transitions files the way the CLI does: options are prepared from them first.
  */
 function transition(files: IntakeDirectory, options: Partial<RootOptions> = {}) {
@@ -737,19 +756,25 @@ export default config;
     expect(output).toContain('packages/second');
   });
 
-  it('infers pnpm as the task runner from common recursive spellings', () => {
-    for (const build of ['pnpm run -r build', 'pnpm -F "./packages/*" build']) {
+  it('infers pnpm as the task runner from recursive test scripts, and per-package builds from recursive builds', () => {
+    const read = (scripts: Record<string, string>) => {
       const files = createRepository();
       const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
         scripts: Record<string, string>;
       };
-      manifest.scripts.build = build;
+      manifest.scripts = { ...manifest.scripts, ...scripts };
       setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+      return prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never });
+    };
 
-      expect(
-        prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).taskRunner,
-      ).toBe('pnpm');
+    for (const test of ['pnpm -r test', 'pnpm --parallel -r test', 'pnpm -F "./packages/*" test']) {
+      expect(read({ test }).taskRunner).toBe('pnpm');
     }
+
+    // CTM's own per-package build, for packages tsdown's workspace mode skips, stays as it is.
+    const recursive = read({ build: 'pnpm --recursive --filter "./packages/*" run build' });
+    expect(recursive.taskRunner).toBe('none');
+    expect(recursive.recursiveBuild).toBe(true);
   });
 
   it("doesn't add Vitest to a repository that tests with something else", () => {
@@ -873,5 +898,54 @@ export default config;
 
     expect(cleanOutput).toBe('node_modules\npackages/*/dist\npackages/*/lib\ncoverage\n');
     expect(getFile(transition(built).files, '.gitignore')).toBe(cleanOutput);
+  });
+
+  it('makes no changes on a second transition after building packages per package', () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['tsdown.config.ts'];
+    setFile(
+      files,
+      'packages/example/tsdown.config.ts',
+      'export default defineConfig({ dts: true });\n',
+    );
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      scripts: Record<string, string>;
+    };
+    delete manifest.scripts.build;
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    applyFiles(files, transition(files).files);
+
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it('keeps --testRunner other on later transitions without the flag', () => {
+    const files = createRepository({ testRunner: 'other' });
+
+    expect(getFile(files, 'vitest.config.ts')).toBeUndefined();
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+    expect(getFile(files, 'vitest.config.ts')).toBeUndefined();
+  });
+
+  it('infers another test runner from packages when the root has no test script', () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['vitest.config.ts'];
+    delete (files as Record<string, unknown>)['eslint.config.ts'];
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    delete manifest.scripts.test;
+    delete manifest.devDependencies.vitest;
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+    const pkg = JSON.parse(getFile(files, 'packages/example/package.json') ?? '{}') as {
+      scripts?: Record<string, string>;
+    };
+    pkg.scripts = { ...pkg.scripts, test: 'jest' };
+    setFile(files, 'packages/example/package.json', JSON.stringify(pkg, null, 2));
+
+    expect(
+      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).testRunner,
+    ).toBe('other');
   });
 });

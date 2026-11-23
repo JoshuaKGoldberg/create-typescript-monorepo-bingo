@@ -141,7 +141,8 @@ A transition adds what a repository is missing and leaves what it has:
 - Jobs CTM finds in an existing workflow are the repository's: CTM doesn't add steps to them or change their settings, apart from `node-version` matrices.
 - A `.gitignore` entry that would hide existing directories, like `lib/` in a repository with `src/lib` folders, isn't added; a suggestion says so.
 - Switching task runners on an existing repository doesn't replace its existing `build` and `test` scripts.
-- A repository testing with something other than Vitest, like `node --test`, gets no Vitest config, CI test jobs, lint rules or starter tests.
+- A repository testing with something other than Vitest, like `node --test` or jest in its packages, gets no Vitest config, CI test jobs, lint rules or starter tests. Once CTM manages a repository with no Vitest anywhere, later transitions keep it that way.
+- A repository's own root Vitest config is kept, and its packages' test scripts are left to it.
 - An existing `tsdown` older than the one CTM pins is kept, with a suggestion to update it, since new packages' configs spread a base written for CTM's version.
 - If tsdown's workspace mode would skip a package config without its own `entry`, packages build with their own `tsdown` scripts instead of one root `tsdown`.
 - pnpm 12.0.0 or newer is needed.

@@ -75,12 +75,12 @@ export const blockPackageJson = packageBase.createBlock({
     const existingScripts = existing.scripts as Record<string, string> | undefined;
     // A package's own scripts win; a task runner only adds the ones it needs.
     // A repository's own Vitest config may not have CTM's per-package projects, so its
-    // packages run Vitest on their own; other test runners are left to the repository.
+    // packages' tests are left to it, as are other test runners'.
     const test =
       options.testRunner === 'other'
         ? undefined
         : options.vitestConfigUnowned
-          ? 'vitest run'
+          ? undefined
           : `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${pkg.directory.split('/').pop() ?? pkg.name}`;
     const scripts = buildsPerPackage(options)
       ? {

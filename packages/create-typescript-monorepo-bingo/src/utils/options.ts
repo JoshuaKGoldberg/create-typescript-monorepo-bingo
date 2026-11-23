@@ -98,6 +98,7 @@ export function usesTaskRunner(options: RootOptions): boolean {
 export function buildsPerPackage(options: RootOptions): boolean {
   return (
     usesTaskRunner(options) ||
+    !!options.recursiveBuild ||
     (options.packages ?? []).some(
       (pkg) => pkg.kind === 'library' && pkg.tsdownWorkspaceReady === false,
     )
@@ -108,9 +109,15 @@ export function buildsPerPackage(options: RootOptions): boolean {
  * Creates pnpm filters for every package directory, like `--filter "./packages/*"`.
  */
 export function getPackageFilters(options: RootOptions): string {
-  return getPackageParents(options)
-    .map((parent) => `--filter "./${parent}/*"`)
-    .join(' ');
+  // Packages in top-level directories, like tools, have no parent to glob.
+  const topLevel = (options.packages ?? [])
+    .map((pkg) => pkg.directory)
+    .filter((directory) => !directory.includes('/'))
+    .sort();
+  return [
+    ...getPackageParents(options).map((parent) => `--filter "./${parent}/*"`),
+    ...topLevel.map((directory) => `--filter "./${directory}"`),
+  ].join(' ');
 }
 
 /**

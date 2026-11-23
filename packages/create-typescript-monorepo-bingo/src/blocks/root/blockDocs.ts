@@ -218,7 +218,15 @@ pnpm knip
 
 ## Testing
 
-[Vitest](https://vitest.dev) is used for tests, with one project per package:
+${
+  options.testRunner === 'other'
+    ? `Run tests with:
+
+\`\`\`shell
+pnpm test
+\`\`\`
+`
+    : `[Vitest](https://vitest.dev) is used for tests, with one project per package:
 
 \`\`\`shell
 pnpm test
@@ -229,7 +237,8 @@ ${
     ? 'Run `pnpm test:coverage` to compute test coverage across all packages'
     : 'Add the `--coverage` flag to compute test coverage'
 } and place reports in the \`coverage/\` directory.
-
+`
+}
 ## Type Checking
 
 TypeScript 7 runs type checking across every package's project references:
