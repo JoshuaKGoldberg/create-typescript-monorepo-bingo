@@ -8,6 +8,7 @@ import { formatJson } from '../../utils/json.ts';
 import { getWorkflowPath } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import { formatYamlFile } from '../../utils/yaml.ts';
+import { blockCSpell } from './blockCSpell.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 
 const changesetReadme = `# Changesets
@@ -156,7 +157,8 @@ export const blockChangesets = rootBase.createBlock({
             'published-packages': "${{ steps.publish.outputs['published-packages'] }}",
           },
           steps: [
-            setup(),
+            // No dependency cache in the one job that holds an OIDC token and a release token.
+            setup({ cache: false }),
             appToken({ 'permission-contents': 'write' }),
             {
               name: 'Publish Packages',
@@ -193,6 +195,9 @@ export const blockChangesets = rootBase.createBlock({
 
     return {
       extensions: [
+        blockCSpell({
+          words: ['marcalexiei', ...app.split('_').filter((word) => /^[A-Z]+$/.test(word))],
+        }),
         blockRootPackageJson({
           devDependencies: pinned('@changesets/changelog-github', '@changesets/cli'),
         }),

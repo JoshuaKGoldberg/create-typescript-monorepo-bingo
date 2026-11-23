@@ -117,6 +117,7 @@ export const blockGitHubActionsCI = rootBase.createBlock({
                   pull_request: null,
                   push: { branches: ['main'] },
                 },
+                permissions: { contents: 'read' },
                 jobs: Object.fromEntries(
                   [...byId.values()]
                     .sort((a, b) => a.id.localeCompare(b.id))

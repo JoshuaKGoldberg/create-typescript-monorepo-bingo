@@ -9,8 +9,8 @@ import { blockGitHubActionsCI } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 import { blockVSCode } from './blockVSCode.ts';
 
+// .github isn't ignored: cspell skips ignored paths even when they're passed explicitly.
 const baseIgnorePaths = [
-  '.github',
   '*.tsbuildinfo',
   'CHANGELOG.md',
   'coverage',

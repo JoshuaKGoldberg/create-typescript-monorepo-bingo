@@ -47,12 +47,20 @@ export const blockVitest = rootBase.createBlock({
             {
               id: 'test_os',
               name: 'Test (${{ matrix.os }})',
-              permissions: { 'id-token': 'write' },
+              // A job's permissions replace the defaults, so contents: read must be listed.
+              permissions: { contents: 'read', 'id-token': 'write' },
               runsOn: '${{ matrix.os }}',
               steps: [
-                { run: "pnpm test ${{ matrix.os == 'ubuntu-latest' && '--coverage' || '' }}" },
                 {
-                  if: "success() && (matrix.os == 'ubuntu-latest')",
+                  // Task runners run each package's tests from its own directory,
+                  // so coverage comes from one root Vitest run instead.
+                  run: usesTaskRunner(options)
+                    ? "pnpm ${{ matrix.os == 'ubuntu-latest' && 'test:coverage' || 'test' }}"
+                    : "pnpm test ${{ matrix.os == 'ubuntu-latest' && '--coverage' || '' }}",
+                },
+                {
+                  // Fork PRs don't get an OIDC token, so they skip the upload.
+                  if: "success() && (matrix.os == 'ubuntu-latest') && github.event.pull_request.head.repo.fork != true",
                   uses: action('codecov/codecov-action'),
                   with: { fail_ci_if_error: true, use_oidc: true },
                 },
@@ -67,7 +75,9 @@ export const blockVitest = rootBase.createBlock({
         blockGitignore({ ignores: ['coverage/'] }),
         blockRootPackageJson({
           devDependencies: pinned('@vitest/coverage-v8', 'console-fail-test', 'vitest'),
-          scripts: usesTaskRunner(options) ? {} : { test: 'vitest' },
+          scripts: usesTaskRunner(options)
+            ? { 'test:coverage': 'vitest run --coverage' }
+            : { test: 'vitest' },
         }),
         blockVSCode({
           extensions: ['vitest.explorer'],
@@ -103,7 +113,9 @@ const config: ViteUserConfigExport = defineConfig({
       reporter: ['html', 'lcov', 'text'],
     },
 
-    projects: readdirSync(path.join(import.meta.dirname, 'packages')).map((name) => ({
+    projects: readdirSync(path.join(import.meta.dirname, 'packages'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map(({ name }) => ({
       test: {
         clearMocks: true,
         include: ['**/src/**/*.test.ts'],

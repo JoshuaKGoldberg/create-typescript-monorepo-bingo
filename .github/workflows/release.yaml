@@ -80,6 +80,8 @@ jobs:
       published-packages: ${{ steps.publish.outputs['published-packages'] }}
     steps:
       - uses: $/.github/actions/setup
+        with:
+          cache: false
       - name: Create Token
         id: create_token
         uses: actions/create-github-app-token@v3.3.0

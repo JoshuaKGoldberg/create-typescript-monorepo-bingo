@@ -5,6 +5,7 @@ import { action } from '../../utils/actions.ts';
 import { readText } from '../../utils/files.ts';
 import { getWorkflowPath } from '../../utils/options.ts';
 import { formatYamlFile } from '../../utils/yaml.ts';
+import { blockCSpell } from './blockCSpell.ts';
 
 /**
  * Owns the OctoGuide workflow, which checks PR titles against Conventional Commits.
@@ -22,6 +23,7 @@ export const blockOctoGuide = rootBase.createBlock({
   },
   produce({ options, props }) {
     return {
+      extensions: [blockCSpell({ words: ['autorelease', 'octoguide'] })],
       files: {
         '.github': {
           workflows: {

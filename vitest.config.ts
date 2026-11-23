@@ -11,15 +11,17 @@ const config: ViteUserConfigExport = defineConfig({
       reporter: ['html', 'lcov', 'text'],
     },
 
-    projects: readdirSync(path.join(import.meta.dirname, 'packages')).map((name) => ({
-      test: {
-        clearMocks: true,
-        include: ['**/src/**/*.test.ts'],
-        name,
-        root: path.join(import.meta.dirname, 'packages', name),
-        setupFiles: ['console-fail-test/setup'],
-      },
-    })),
+    projects: readdirSync(path.join(import.meta.dirname, 'packages'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map(({ name }) => ({
+        test: {
+          clearMocks: true,
+          include: ['**/src/**/*.test.ts'],
+          name,
+          root: path.join(import.meta.dirname, 'packages', name),
+          setupFiles: ['console-fail-test/setup'],
+        },
+      })),
   },
 });
 

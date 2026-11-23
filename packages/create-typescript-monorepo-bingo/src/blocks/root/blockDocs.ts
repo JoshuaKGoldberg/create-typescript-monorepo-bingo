@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults, type RootOptions } from '../../options.ts';
 import { getEntry } from '../../utils/files.ts';
-import { getRepositoryUrl } from '../../utils/options.ts';
+import { getRepositoryUrl, usesTaskRunner } from '../../utils/options.ts';
 import { formatYaml } from '../../utils/yaml.ts';
 
 const docPaths = [
@@ -196,7 +196,11 @@ pnpm knip
 pnpm test
 \`\`\`
 
-Add the \`--coverage\` flag to compute test coverage and place reports in the \`coverage/\` directory.
+${
+  usesTaskRunner(options)
+    ? 'Run `pnpm test:coverage` to compute test coverage across all packages'
+    : 'Add the `--coverage` flag to compute test coverage'
+} and place reports in the \`coverage/\` directory.
 
 ## Type Checking
 
@@ -216,6 +220,13 @@ Add a changeset describing your change with:
 \`\`\`shell
 pnpm changeset
 \`\`\`
+
+The release workflow then opens a "Version Packages" PR, and publishes once it's merged.
+It needs, once per repository:
+
+- A GitHub App with contents and pull requests write access, installed on the repository, with its client ID in the \`${options.releaseApp ?? defaults.releaseApp}_CLIENT_ID\` Actions variable and a private key in the \`${options.releaseApp ?? defaults.releaseApp}_PRIVATE_KEY\` Actions secret
+- An [npm trusted publisher](https://docs.npmjs.com/trusted-publishers) for each package, pointing at the release workflow (a package's very first version may need to be published manually)
+- [Codecov](https://codecov.io) enabled for the repository, for coverage uploads
 `,
     '.github/ISSUE_TEMPLATE/01-bug.{yaml}': createIssueTemplate(
       '🐛 Report a Bug',

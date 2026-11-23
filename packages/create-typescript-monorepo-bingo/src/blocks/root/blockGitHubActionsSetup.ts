@@ -41,7 +41,6 @@ export const blockGitHubActionsSetup = rootBase.createBlock({
                     'install-flags': {
                       description: 'Flags to pass to `pnpm install`',
                       required: false,
-                      type: 'string',
                     },
                     'node-version': {
                       description: 'Node.js version to use',

@@ -66,9 +66,13 @@ export const blockTurborepo = rootBase.createBlock({
           tasks: {
             build: {
               dependsOn: ['^build'],
+              // The build package's configs aren't a build dependency turbo can see.
+              inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/packages/build/**'],
               outputs: ['dist/**', 'lib/**', 'node_modules/.cache/tsbuild/**'],
             },
             test: {
+              // Each package's tests run with the root Vitest config.
+              inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/vitest.config.ts'],
               outputs: [],
             },
           },
@@ -116,12 +120,12 @@ export const blockNx = rootBase.createBlock({
             build: {
               cache: true,
               dependsOn: ['^build'],
-              inputs: ['production', '^production'],
+              inputs: ['production', '^production', '{workspaceRoot}/packages/build/**/*'],
               outputs: ['{projectRoot}/dist', '{projectRoot}/lib'],
             },
             test: {
               cache: true,
-              inputs: ['default', '^production'],
+              inputs: ['default', '^production', '{workspaceRoot}/vitest.config.ts'],
             },
           },
         }),

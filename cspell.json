@@ -2,7 +2,6 @@
   "dictionaries": ["node", "npm", "typescript"],
   "ignorePaths": [
     "*.tsbuildinfo",
-    ".github",
     "CHANGELOG.md",
     "coverage",
     "node_modules",
@@ -18,6 +17,7 @@
     "octoguide",
     "quasis",
     "RELEASEBOT",
-    "unparseable"
+    "unparseable",
+    "APP"
   ]
 }

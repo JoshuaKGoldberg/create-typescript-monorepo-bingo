@@ -83,7 +83,15 @@ const scenarios: Scenario[] = [
     ],
   },
   ...(['pnpm', 'turbo', 'nx'] as const).map((taskRunner) => ({
-    checks: ['pnpm build', 'pnpm test', 'pnpm typecheck', 'pnpm lint', 'pnpm knip'],
+    checks: [
+      'pnpm build',
+      'pnpm test',
+      'pnpm test:coverage',
+      'pnpm typecheck',
+      'pnpm lint',
+      'pnpm knip',
+      'pnpm lint:spelling',
+    ],
     name: `task-runner-${taskRunner}`,
     steps: [
       { mode: 'setup' as const, options: { ...newRepository, taskRunner } },

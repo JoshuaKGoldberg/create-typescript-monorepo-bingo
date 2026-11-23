@@ -294,7 +294,7 @@ function getWrittenSpecifier(
   if (kind === 'build' && field === 'dependencies') {
     const ours =
       dependency === 'tsdown'
-        ? `^${pin('tsdown')}`
+        ? pin('tsdown')
         : dependency === 'typescript'
           ? pin('typescript')
           : undefined;

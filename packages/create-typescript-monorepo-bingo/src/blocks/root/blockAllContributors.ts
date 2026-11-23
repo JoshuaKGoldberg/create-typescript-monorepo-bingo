@@ -70,7 +70,7 @@ export const blockAllContributors = rootBase.createBlock({
                     },
                     steps: [
                       { uses: action('actions/checkout'), with: { 'fetch-depth': 0 } },
-                      { uses: '$/.github/actions/setup' },
+                      { uses: '$/.github/actions/setup', with: { 'skip-checkout': true } },
                       {
                         uses: action('JoshuaKGoldberg/all-contributors-auto-action'),
                         env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' },

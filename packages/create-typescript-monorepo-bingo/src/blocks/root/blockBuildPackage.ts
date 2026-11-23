@@ -116,7 +116,7 @@ export const blockBuildPackage = rootBase.createBlock({
       'dependencies',
       existing.dependencies as Dependencies | undefined,
       {
-        tsdown: `^${pin('tsdown')}`,
+        tsdown: pin('tsdown'),
         typescript: typescriptSpecifier(),
       },
       'devDependencies',
