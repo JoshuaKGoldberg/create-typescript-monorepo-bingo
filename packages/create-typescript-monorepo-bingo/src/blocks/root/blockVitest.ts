@@ -11,7 +11,7 @@ import {
   readText,
   withoutAlternate,
 } from '../../utils/files.ts';
-import { getPackageParents, usesTaskRunner } from '../../utils/options.ts';
+import { getPackageParents, getTopLevelPackages, usesTaskRunner } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import { blockGitHubActionsCI, getNodeVersionsMatrix } from './blockGitHubActionsCI.ts';
 import { blockGitignore } from './blockGitignore.ts';
@@ -31,18 +31,26 @@ export const blockVitest = rootBase.createBlock({
     const existing = readText(files, 'vitest.config.ts');
     return {
       ...(alternate && { alternate }),
+      ...(existing !== undefined && { existing: true }),
       ...(!isOwnedFile(existing) && { unowned: true }),
     };
   },
   props: {
     alternate: z.string().optional(),
+    existing: z.boolean().optional(),
     unowned: z.boolean().optional(),
     coverageExclude: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
     // A repository testing with something else, like node --test, keeps its own setup.
     if (options.testRunner === 'other') {
-      return {};
+      return props.existing && !props.unowned
+        ? {
+            suggestions: [
+              "This repository doesn't test with Vitest, so CTM no longer updates vitest.config.ts: delete it, along with Vitest dependencies Knip reports as unused, like @vitest/coverage-v8 and console-fail-test.",
+            ],
+          }
+        : {};
     }
 
     const coverageExclude = ['**/config.ts', ...(props.coverageExclude ?? [])]
@@ -132,15 +140,22 @@ export const blockVitest = rootBase.createBlock({
       ],
       files: {
         ...(!props.unowned && {
-          'vitest.config.ts': createVitestConfig(getPackageParents(options), coverageExclude),
+          'vitest.config.ts': createVitestConfig(
+            getPackageParents(options),
+            getTopLevelPackages(options),
+            coverageExclude,
+          ),
         }),
       },
     });
   },
 });
 
-function createVitestConfig(parents: string[], coverageExclude: string) {
-  const include = parents.map((parent) => `'${parent}/*/src/**/*.ts'`).join(', ');
+function createVitestConfig(parents: string[], topLevel: string[], coverageExclude: string) {
+  const include = [
+    ...parents.map((parent) => `'${parent}/*/src/**/*.ts'`),
+    ...topLevel.map((directory) => `'${directory}/src/**/*.ts'`),
+  ].join(', ');
   const project = (
     parentExpression: string,
     indent: string,
@@ -156,20 +171,67 @@ ${indent}    setupFiles: ['console-fail-test/setup'],
 ${indent}  },
 ${indent}}))`;
 
-  const projects =
-    parents.length === 1
-      ? project(`'${parents[0] ?? 'packages'}'`, '      ')
-      : `[${parents.map((parent) => `'${parent}'`).join(', ')}].flatMap((parent) =>
-      ${project('parent', '        ')},
-    )`;
+  // One parent directory, like packages, can't repeat folder names: its projects are simplest.
+  if (parents.length === 1 && !topLevel.length) {
+    return printVitestConfig(
+      "import { readdirSync } from 'node:fs';",
+      '',
+      include,
+      coverageExclude,
+      project(`'${parents[0] ?? 'packages'}'`, '      '),
+    );
+  }
 
+  const directories = `
+// Every package directory: each one in the parent directories, then top-level packages.
+const directories = [${parents.map((parent) => `'${parent}'`).join(', ')}]
+  .flatMap((parent) =>
+    existsSync(path.join(import.meta.dirname, parent))
+      ? readdirSync(path.join(import.meta.dirname, parent), { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map(({ name }) => \`\${parent}/\${name}\`)
+      : [],
+  )
+  .concat([${topLevel.map((directory) => `'${directory}'`).join(', ')}]);
+
+// Projects are named by folder, or by path where folder names repeat across parents.
+const folders = directories.map((directory) => path.posix.basename(directory));
+`;
+
+  return printVitestConfig(
+    "import { existsSync, readdirSync } from 'node:fs';",
+    directories,
+    include,
+    coverageExclude,
+    `directories.map((directory, index) => ({
+      test: {
+        clearMocks: true,
+        include: ['**/src/**/*.test.ts'],
+        name:
+          folders.indexOf(folders[index]) === folders.lastIndexOf(folders[index])
+            ? folders[index]
+            : directory,
+        root: path.join(import.meta.dirname, directory),
+        setupFiles: ['console-fail-test/setup'],
+      },
+    }))`,
+  );
+}
+
+function printVitestConfig(
+  fsImport: string,
+  statements: string,
+  include: string,
+  coverageExclude: string,
+  projects: string,
+) {
   return `${ownedFileMarker}
 
-import { readdirSync } from 'node:fs';
+${fsImport}
 import path from 'node:path';
 
 import { defaultExclude, defineConfig } from 'vitest/config';
-
+${statements}
 // Untyped, so this works with every Vitest version that has projects.
 const config = defineConfig({
   test: {

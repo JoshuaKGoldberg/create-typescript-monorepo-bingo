@@ -141,7 +141,7 @@ export function getPackageGlobs(options: RootOptions, suffix: string): string[] 
 /**
  * Gets packages in top-level directories, like tools, which have no parent to glob.
  */
-function getTopLevelPackages(options: RootOptions): string[] {
+export function getTopLevelPackages(options: RootOptions): string[] {
   return (options.packages ?? [])
     .map((pkg) => pkg.directory)
     .filter((directory) => !directory.includes('/'))

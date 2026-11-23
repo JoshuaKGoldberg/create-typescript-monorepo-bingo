@@ -75,14 +75,19 @@ export const blockPackageJson = packageBase.createBlock({
     const sharedHomepage = getSharedHomepage(options.packages ?? [], pkg);
     const existingScripts = existing.scripts as Record<string, string> | undefined;
     // A package's own scripts win; a task runner only adds the ones it needs.
+    // CTM's Vitest config names projects by folder, or by path where folder names repeat.
+    const folder = pkg.directory.split('/').pop() ?? pkg.directory;
+    const project = (options.packages ?? []).some(
+      (other) => other.directory !== pkg.directory && other.directory.split('/').pop() === folder,
+    )
+      ? pkg.directory
+      : folder;
     // A repository's own Vitest config may not have CTM's per-package projects, so its
     // packages' tests are left to it, as are other test runners'.
-    // CTM's Vitest projects are the packages in parent directories, like packages/*,
-    // so a package in a top-level directory, like tools, has no project to run.
     const test =
-      options.testRunner === 'other' || options.vitestConfigUnowned || !pkg.directory.includes('/')
+      options.testRunner === 'other' || options.vitestConfigUnowned
         ? undefined
-        : `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${pkg.directory.split('/').pop() ?? pkg.name}`;
+        : `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${project}`;
     const scripts = buildsPerPackage(options)
       ? {
           build: 'tsdown',
@@ -179,6 +184,8 @@ function getSharedHomepage(packages: PackageSpec[], pkg: PackageSpec) {
     other.name.split('/').pop() ?? other.name,
   ]);
   // Compared by whole URL path segments, so a site like bingo.js.org isn't ruled out.
-  const segments = new Set(homepage.replace(/^\w+:\/\/[^/]*/, '').split(/[/#?]/));
+  // A GitHub repository's owner and name, as in its readme's URL, don't name a package.
+  const path = homepage.replace(/^https?:\/\/github\.com\/[^/]+\/[^/#?]+/, '');
+  const segments = new Set(path.replace(/^\w+:\/\/[^/]*/, '').split(/[/#?]/));
   return names.some((name) => segments.has(name)) ? undefined : homepage;
 }

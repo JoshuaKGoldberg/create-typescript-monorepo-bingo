@@ -85,6 +85,35 @@ const scenarios: Scenario[] = [
       { mode: 'transition', options: { newPackage: '@example/third' } },
     ],
   },
+  {
+    checks: allChecks,
+    // Repeated folder names across parents, and a package in a top-level directory.
+    name: 'multi-parent',
+    steps: [
+      {
+        mode: 'setup',
+        options: {
+          ...newRepository,
+          packages: [
+            {
+              description: 'An app.',
+              directory: 'apps/example',
+              kind: 'library',
+              name: 'app-example',
+            },
+            {
+              description: 'A package.',
+              directory: 'packages/example',
+              kind: 'library',
+              name: 'example',
+            },
+            { description: 'Tools.', directory: 'tools', kind: 'library', name: 'tools' },
+          ],
+        },
+      },
+      { mode: 'transition', options: { newPackage: 'second' } },
+    ],
+  },
   ...(['pnpm', 'turbo', 'nx'] as const).map((taskRunner) => ({
     checks: [
       'pnpm build',

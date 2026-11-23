@@ -363,9 +363,10 @@ type SpannedNode = AstNode & { end: number; start: number };
 
 /**
  * Finds what a repository added to a flat ESLint config made by CTM. CTM's own entries are
- * matched by their `files` and keys, at most once each; every other entry, import and
+ * matched by their `files`, keys and first extended config, at most once each; every other entry, import and
  * top-level statement is kept, along with comments before them. Entries and imports in
- * `dropped`, which CTM no longer writes, are removed only when their text matches exactly.
+ * `dropped`, which CTM no longer writes, are removed only when their text matches exactly,
+ * and imports only when nothing kept still uses them.
  */
 export function readESLintExtras(
   sourceText: string | undefined,
@@ -385,10 +386,11 @@ export function readESLintExtras(
   const own = parseSync('eslint.config.ts', ownSource);
   const ownBody = own.program.body as unknown as SpannedNode[];
   const ownImportNodes = ownBody.filter((node) => node.type === 'ImportDeclaration');
-  const ownImports = new Set([
-    ...ownImportNodes.map((node) => normalize(ownSource.slice(node.start, node.end))),
-    ...(dropped?.imports.map(normalize) ?? []),
-  ]);
+  const ownImports = new Set(
+    ownImportNodes.map((node) => normalize(ownSource.slice(node.start, node.end))),
+  );
+  const droppedImports = new Set(dropped?.imports.map(normalize));
+  const pendingImports: { names: string[]; text: string }[] = [];
   const droppedConfigs = new Set(dropped?.configs.map(normalizeCode));
   const remaining = getConfigArgs(ownBody).map(getESLintConfigSignature);
 
@@ -417,7 +419,11 @@ export function readESLintExtras(
     const text = [...comments, sourceText.slice(node.start, node.end)].join('\n');
 
     if (node.type === 'ImportDeclaration') {
-      if (!ownImports.has(normalize(sourceText.slice(node.start, node.end)))) {
+      const normalized = normalize(sourceText.slice(node.start, node.end));
+      if (droppedImports.has(normalized)) {
+        // Decided once the kept entries are known, since one may still use it.
+        pendingImports.push({ names: getImportedNames(node), text });
+      } else if (!ownImports.has(normalized)) {
         imports.push(text);
         for (const name of getImportedNames(node)) {
           declaredNames.add(name);
@@ -451,6 +457,13 @@ export function readESLintExtras(
       configs.push([...comments, sourceText.slice(arg.start, arg.end)].join('\n  '));
     } else {
       remaining.splice(index, 1);
+    }
+  }
+
+  const kept = [...configs, ...statements].join('\n');
+  for (const { names, text } of pendingImports) {
+    if (names.some((name) => new RegExp(`\\b${name}\\b`).test(kept))) {
+      imports.push(text);
     }
   }
 
@@ -558,5 +571,23 @@ function getESLintConfigSignature(node: AstNode): string {
     )
     .sort();
 
-  return `files:${JSON.stringify(files ? (evaluate(files.value as AstNode) ?? null) : null)};keys:${keys.join(',')}`;
+  // The first extended config's root, like vitest or jest, tells apart entries for the
+  // same files, such as another test runner's entry for test files.
+  const extendsProperty = properties.find(
+    (property) => property.type === 'Property' && getKeyName(property.key as AstNode) === 'extends',
+  );
+  const firstExtended = (extendsProperty?.value as AstNode | undefined)?.elements as
+    | (AstNode | null)[]
+    | undefined;
+
+  return `files:${JSON.stringify(files ? (evaluate(files.value as AstNode) ?? null) : null)};keys:${keys.join(',')};extends:${getRootName(firstExtended?.[0] ?? undefined) ?? ''}`;
+}
+
+function getRootName(node: AstNode | undefined): string | undefined {
+  let current = node;
+  while (current && current.type !== 'Identifier') {
+    current = (current.object ?? current.argument ?? current.callee) as AstNode | undefined;
+  }
+
+  return current?.name as string | undefined;
 }

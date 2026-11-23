@@ -1055,7 +1055,7 @@ export default config;
     expect(applyFiles(files, transition(files).files)).toEqual([]);
   });
 
-  it('gives a library in a top-level directory no Vitest project script, and lints its configs', () => {
+  it('gives a library in a top-level directory a Vitest project, and lints its configs', () => {
     const files = createRepository({ taskRunner: 'pnpm' });
     const example = (files.packages as IntakeDirectory).example as IntakeDirectory;
     files.tools = structuredClone(example);
@@ -1067,7 +1067,10 @@ export default config;
 
     const output = transition(files).files;
 
-    expect(getFile(output, 'tools/package.json')).not.toContain('vitest');
+    expect(getFile(output, 'tools/package.json')).toContain(
+      'vitest run --config ../vitest.config.ts --project tools',
+    );
+    expect(getFile(output, 'vitest.config.ts')).toContain(".concat(['tools'])");
     expect(getFile(output, 'tsconfig.json')).toContain('./tools/*.config.ts');
     expect(getFile(output, 'eslint.config.ts')).toContain("'tools/dist'");
   });
@@ -1103,6 +1106,167 @@ export default config;
     expect(
       prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).testRunner,
     ).toBe('other');
+  });
+});
+
+describe('round 11 regressions', () => {
+  const setManifest = (
+    files: IntakeDirectory,
+    path: string,
+    update: (manifest: Partial<Record<string, Record<string, string>>>) => void,
+  ) => {
+    const manifest = JSON.parse(getFile(files, path) ?? '{}') as Partial<
+      Record<string, Record<string, string>>
+    >;
+    update(manifest);
+    setFile(files, path, JSON.stringify(manifest, null, 2));
+  };
+
+  it('keeps the Vitest import an edited Vitest entry still uses without Vitest', () => {
+    const files = createRepository();
+    setFile(
+      files,
+      'eslint.config.ts',
+      (getFile(files, 'eslint.config.ts') ?? '').replace(
+        "'vitest/no-conditional-expect': 'off',",
+        "'vitest/no-conditional-expect': 'off',\n      'vitest/expect-expect': 'off',",
+      ),
+    );
+    setManifest(files, 'package.json', (manifest) => {
+      manifest.scripts = { ...manifest.scripts, test: 'node --test' };
+      delete manifest.devDependencies?.vitest;
+    });
+
+    applyFiles(files, transition(files).files);
+    const config = getFile(files, 'eslint.config.ts') ?? '';
+
+    expect(config).toContain("'vitest/expect-expect': 'off'");
+    expect(config).toContain("import vitest from '@vitest/eslint-plugin';");
+    expect(isParseable(config)).toBe(true);
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it("doesn't count missing files as signs of a managed repository without tests", () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['vitest.config.ts'];
+    delete (files as Record<string, unknown>)['knip.config.ts'];
+    delete (files.packages as Record<string, unknown>).build;
+    setFile(
+      files,
+      'eslint.config.ts',
+      (getFile(files, 'eslint.config.ts') ?? '').replace(ownedFileMarker, ''),
+    );
+    setManifest(files, 'package.json', (manifest) => {
+      delete manifest.scripts?.test;
+      delete manifest.devDependencies?.vitest;
+    });
+
+    expect(
+      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).testRunner,
+    ).toBeUndefined();
+  });
+
+  it('names Vitest projects by path when folder names repeat across parents', () => {
+    const files = createRepository({ taskRunner: 'pnpm' });
+    const example = (files.packages as IntakeDirectory).example as IntakeDirectory;
+    files.apps = { example: structuredClone(example) };
+    setManifest(files, 'apps/example/package.json', (manifest) => {
+      (manifest as Record<string, unknown>).name = 'app-example';
+      delete (manifest as Record<string, unknown>).scripts;
+    });
+    setManifest(files, 'packages/example/package.json', (manifest) => {
+      delete (manifest as Record<string, unknown>).scripts;
+    });
+    setFile(files, 'pnpm-workspace.yaml', "packages:\n  - 'apps/*'\n  - 'packages/*'\n");
+
+    const output = transition(files).files;
+
+    expect(getFile(output, 'apps/example/package.json')).toContain('--project apps/example');
+    expect(getFile(output, 'packages/example/package.json')).toContain(
+      '--project packages/example',
+    );
+    expect(getFile(output, 'vitest.config.ts')).toContain('folders.lastIndexOf');
+  });
+
+  it("guards a parent directory that doesn't exist in the Vitest config", () => {
+    const output = produceMonorepo({
+      mode: 'setup',
+      options: {
+        ...newRepository,
+        packages: [{ directory: 'web', kind: 'library', name: 'web' }],
+      },
+    }).files;
+
+    expect(getFile(output, 'vitest.config.ts')).toContain(
+      'existsSync(path.join(import.meta.dirname, parent))',
+    );
+  });
+
+  it("keeps another test runner's entry for test files when a repository starts using Vitest", () => {
+    const files = createRepository({ testRunner: 'other' });
+    const jestEntry = `{
+    extends: [jest.configs['flat/recommended']],
+    files: ['**/*.test.*'],
+    rules: { 'jest/no-conditional-expect': 'off' },
+    settings: { jest: { version: 30 } },
+  }`;
+    setFile(
+      files,
+      'eslint.config.ts',
+      (getFile(files, 'eslint.config.ts') ?? '')
+        .replace(
+          "import tseslint from 'typescript-eslint';",
+          "import jest from 'eslint-plugin-jest';\nimport tseslint from 'typescript-eslint';",
+        )
+        .replace(/\n\);\n$/, `\n  ${jestEntry},\n);\n`),
+    );
+    setManifest(files, 'package.json', (manifest) => {
+      manifest.devDependencies = { ...manifest.devDependencies, vitest: '^5.0.0' };
+    });
+
+    const config = getFile(transition(files).files, 'eslint.config.ts');
+
+    expect(config).toContain(jestEntry);
+    expect(config).toContain('vitest.configs.recommended');
+  });
+
+  it('suggests deleting the Vitest config CTM no longer updates', () => {
+    const files = createRepository();
+    setManifest(files, 'package.json', (manifest) => {
+      manifest.scripts = { ...manifest.scripts, test: 'node --test' };
+      delete manifest.devDependencies?.vitest;
+    });
+
+    expect(transition(files).suggestions).toContainEqual(expect.stringContaining('delete it'));
+  });
+
+  it('shares a GitHub readme homepage that names the repository', () => {
+    const files = createRepository();
+    applyFiles(files, transition(files, { newPackage: 'second' }).files);
+    for (const directory of ['example', 'second']) {
+      setHomepage(files, `packages/${directory}`, 'https://github.com/example-org/example#readme');
+    }
+
+    expect(
+      getFile(transition(files, { newPackage: 'third' }).files, 'packages/third/package.json'),
+    ).toContain('"homepage": "https://github.com/example-org/example#readme"');
+  });
+
+  it.each([
+    ['pnpm --filter ./docs build && pnpm -r build', true],
+    ['pnpm --filter-prod ./docs build', undefined],
+    ['pnpm --filter docs... build', true],
+    ['pnpm --filter ./packages/example/ build', true],
+    ['pnpm --filter ...docs build', undefined],
+  ])('infers per-package builds from %s', (build, expected) => {
+    const files = createRepository();
+    setManifest(files, 'package.json', (manifest) => {
+      manifest.scripts = { ...manifest.scripts, build };
+    });
+
+    expect(
+      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).recursiveBuild,
+    ).toBe(expected);
   });
 });
 

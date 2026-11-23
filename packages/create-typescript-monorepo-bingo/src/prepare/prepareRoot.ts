@@ -444,32 +444,39 @@ const recursivePnpm = /\bpnpm\b[^&|;]*\s(?:-r|--recursive|-F|--filter)\b/;
  * recursively or filtered to them, rather than, say, only a docs site's.
  */
 function buildsLibrariesRecursively(script: string | undefined, packages: PackageSpec[]) {
-  if (!script || !recursivePnpm.test(script)) {
-    return false;
-  }
-
-  const filters = [...script.matchAll(/(?:-F|--filter)(?:=|\s+)["']?([^\s"']+)/g)].map(
-    ([, filter = '']) => filter,
-  );
-  if (!filters.length) {
-    return true;
-  }
-
   const libraries = packages.filter((pkg) => pkg.kind === 'library');
-  return filters.some((filter) => {
-    // Path filters, like ./packages/*, are relative to the root; others match names.
-    const isPath = filter.startsWith('.') || filter.startsWith('{');
-    const pattern = new RegExp(
-      `^${filter
-        .replace(/^\{(.*)\}$/, '$1')
-        .replace(/^\.\//, '')
-        .replace(/\.{3}$|^\.{3}/g, '')
-        .replaceAll(/[.+?^${}()|[\]\\]/g, '\\$&')
-        .replaceAll('*', '.*')}$`,
+
+  // Each command counts on its own, as in `pnpm --filter ./docs build && pnpm -r build`.
+  return (script ?? '').split(/&&|\|\||;/).some((command) => {
+    if (!recursivePnpm.test(command)) {
+      return false;
+    }
+
+    const filters = [...command.matchAll(/(?:-F|--filter(?:-prod)?)(?:=|\s+)["']?([^\s"']+)/g)].map(
+      ([, filter = '']) => filter,
     );
+
     return (
-      filter.startsWith('!') ||
-      libraries.some((pkg) => pattern.test(isPath ? pkg.directory : pkg.name))
+      !filters.length ||
+      filters.some((filter) => {
+        // Negations, and a package's dependencies (`docs...`, `docs^...`), can be libraries.
+        if (filter.startsWith('!') || filter.endsWith('...')) {
+          return true;
+        }
+
+        // Path filters, like ./packages/*, are relative to the root; others match names.
+        const isPath = filter.startsWith('.') || filter.startsWith('{');
+        const pattern = new RegExp(
+          `^${filter
+            .replace(/^\{(.*)\}$/, '$1')
+            .replace(/^\.\.\./, '')
+            .replace(/^\.\//, '')
+            .replace(/\/$/, '')
+            .replaceAll(/[.+?^${}()|[\]\\]/g, '\\$&')
+            .replaceAll('*', '.*')}$`,
+        );
+        return libraries.some((pkg) => pattern.test(isPath ? pkg.directory : pkg.name));
+      })
     );
   });
 }
@@ -672,10 +679,12 @@ function inferTestRunner(
   }
 
   // Packages testing with something else, or a repository CTM already manages without
-  // Vitest anywhere, as \`--testRunner other\` leaves it.
-  const managed = ['eslint.config.ts', 'knip.config.ts', 'packages/build/src/tsdown/base.ts'].some(
-    (path) => isOwnedFile(readText(files, path)),
-  );
+  // Vitest anywhere, as `--testRunner other` leaves it.
+  // Only files that exist count: a missing one isn't a sign CTM manages the repository.
+  const managed = ['eslint.config.ts', 'packages/build/src/tsdown/base.ts'].some((path) => {
+    const text = readText(files, path);
+    return text !== undefined && isOwnedFile(text);
+  });
   return packages.some((pkg) => pkg.manifest.scripts?.test) || managed
     ? { testRunner: 'other' }
     : {};

@@ -135,7 +135,6 @@ A transition adds what a repository is missing and leaves what it has:
 ### Limitations
 
 - Workspace globs must be single-level (`packages/*`) or exact directories.
-- CTM's Vitest projects are the packages in globbed directories, like `packages/*`: a package in a top-level directory, like `tools`, gets no CTM test script, and its tests are its own to run.
 - Packages that aren't built with tsdown are detected as repository-owned and left alone.
 - In named catalog mode, dependencies with different versions across packages stay out of catalogs, with a suggestion printed; stray default-catalog entries are kept as they are.
 - The root `package.json` must be private: repositories whose root is itself a published package are refused.
