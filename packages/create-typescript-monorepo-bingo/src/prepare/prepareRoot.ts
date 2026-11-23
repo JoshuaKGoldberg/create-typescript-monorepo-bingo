@@ -4,7 +4,7 @@ import { parse as parseYaml } from 'yaml';
 
 import type { CatalogMode, PackageKind, PackageSpec, RootOptions, TaskRunner } from '../options.ts';
 import { type DependencyField, dependencyFields } from '../utils/catalogs.ts';
-import { getDirectory, getEntry, readJson, readText } from '../utils/files.ts';
+import { getDirectory, getEntry, isOwnedFile, readJson, readText } from '../utils/files.ts';
 import { pin, tryPin } from '../utils/pins.ts';
 import { isProtocolSpecifier, parseNpmAlias, resolveSpecifier } from '../utils/versions.ts';
 
@@ -94,6 +94,7 @@ export function prepareRoot(
     ...inferTypeScript7Alias(rootManifest, workspace),
     ...inferFormatter(files, rootManifest),
     ...inferVitestConfig(files),
+    ...inferTestRunner(rootManifest, workspacePackages),
     ...inferWorkflowExtension(files),
   };
 }
@@ -127,6 +128,8 @@ export function findWorkspacePackages(
   globs: string[],
 ): WorkspacePackage[] {
   const found: WorkspacePackage[] = [];
+  // Hand-written lists may hold empty items, which pnpm ignores.
+  globs = globs.filter((glob): glob is string => typeof glob === 'string');
   const excluded = new Set(
     globs
       .filter((glob) => glob.startsWith('!'))
@@ -547,7 +550,14 @@ function inferVitestConfig(files: IntakeDirectory): Partial<RootOptions> {
     'vite.config.js',
     'vite.config.mjs',
   ].find((candidate) => getEntry(files, candidate));
-  return name ? { vitestConfig: name } : {};
+  const existing = readText(files, 'vitest.config.ts');
+  return {
+    ...(name && { vitestConfig: name }),
+    // A repository's own config may not define the per-package projects CTM's does.
+    ...((name !== undefined || (existing !== undefined && !isOwnedFile(existing))) && {
+      vitestConfigUnowned: true,
+    }),
+  };
 }
 
 /**
@@ -578,5 +588,38 @@ function inferDescription(
 }
 
 function isTsdownWorkspaceReady(config: string | undefined) {
-  return config === undefined || /\bentry\b|\.\.\.\s*base\b/.test(config);
+  const code = config?.replaceAll(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+  return code === undefined || /\bentry\s*:|\.\.\.\s*base\b/.test(code);
+}
+
+/**
+ * Infers whether a repository tests with Vitest. A task runner's test script, like
+ * \`turbo run test\`, defers to the packages' own scripts and dependencies.
+ */
+function inferTestRunner(
+  manifest: PackageManifest | undefined,
+  packages: WorkspacePackage[],
+): Partial<RootOptions> {
+  const test = manifest?.scripts?.test;
+  const mentionsVitest = (candidate: PackageManifest | undefined) => {
+    // Scripts are indexed by name, so a test script may not exist.
+    const script: string | undefined = candidate?.scripts?.test;
+    return (
+      !!candidate && ('vitest' in getAllDependencies(candidate) || !!script?.includes('vitest'))
+    );
+  };
+
+  if (test === undefined || mentionsVitest(manifest)) {
+    return {};
+  }
+
+  const delegates = /\b(?:turbo|nx)\b|\bpnpm (?:run )?(?:-r|--recursive|-F|--filter)\b/.test(test);
+  if (delegates) {
+    const packageTests = packages.filter((pkg) => pkg.manifest.scripts?.test);
+    return packageTests.length === 0 || packages.some((pkg) => mentionsVitest(pkg.manifest))
+      ? {}
+      : { testRunner: 'other' };
+  }
+
+  return { testRunner: 'other' };
 }

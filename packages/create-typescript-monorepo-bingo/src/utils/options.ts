@@ -92,6 +92,28 @@ export function usesTaskRunner(options: RootOptions): boolean {
 }
 
 /**
+ * Whether packages build with their own scripts: with a task runner, or when tsdown's
+ * workspace mode would skip a package config without an entry of its own.
+ */
+export function buildsPerPackage(options: RootOptions): boolean {
+  return (
+    usesTaskRunner(options) ||
+    (options.packages ?? []).some(
+      (pkg) => pkg.kind === 'library' && pkg.tsdownWorkspaceReady === false,
+    )
+  );
+}
+
+/**
+ * Creates pnpm filters for every package directory, like `--filter "./packages/*"`.
+ */
+export function getPackageFilters(options: RootOptions): string {
+  return getPackageParents(options)
+    .map((parent) => `--filter "./${parent}/*"`)
+    .join(' ');
+}
+
+/**
  * Gets the directories that hold workspace packages, such as `packages` and `apps`.
  */
 export function getPackageParents(options: RootOptions): string[] {

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { rootBase } from '../../bases/rootBase.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatJson } from '../../utils/json.ts';
-import { getPackageParents } from '../../utils/options.ts';
+import { getPackageFilters } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import { blockGitignore } from './blockGitignore.ts';
 import { blockPnpmWorkspace } from './blockPnpmWorkspace.ts';
@@ -24,9 +24,7 @@ export const blockPnpmTasks = rootBase.createBlock({
       return {};
     }
 
-    const filters = getPackageParents(options)
-      .map((parent) => `--filter "./${parent}/*"`)
-      .join(' ');
+    const filters = getPackageFilters(options);
 
     return {
       extensions: [

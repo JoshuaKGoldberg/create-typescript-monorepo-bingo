@@ -8,7 +8,6 @@ import {
   findAlternateConfig,
   isOwnedFile,
   ownedFileMarker,
-  parseJsonText,
   readText,
   withoutAlternate,
 } from '../../utils/files.ts';
@@ -30,28 +29,19 @@ export const blockVitest = rootBase.createBlock({
   intake({ files }) {
     const alternate = findAlternateConfig(files, 'vitest');
     const existing = readText(files, 'vitest.config.ts');
-    const test = (
-      parseJsonText(readText(files, 'package.json'), 'package.json').scripts as
-        | Record<string, string>
-        | undefined
-    )?.test;
     return {
       ...(alternate && { alternate }),
       ...(!isOwnedFile(existing) && { unowned: true }),
-      // A repository testing with something else, like node --test, keeps its own setup.
-      ...(test !== undefined &&
-        !test.includes('vitest') &&
-        !/\bpnpm\b/.test(test) && { otherTestRunner: true }),
     };
   },
   props: {
     alternate: z.string().optional(),
-    otherTestRunner: z.boolean().optional(),
     unowned: z.boolean().optional(),
     coverageExclude: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
-    if (props.otherTestRunner) {
+    // A repository testing with something else, like node --test, keeps its own setup.
+    if (options.testRunner === 'other') {
       return {};
     }
 

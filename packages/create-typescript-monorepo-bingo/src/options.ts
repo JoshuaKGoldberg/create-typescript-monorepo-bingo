@@ -91,11 +91,18 @@ export const rootOptionsShape = {
   taskRunner: literalUnion(taskRunners)
     .optional()
     .describe("task runner to orchestrate scripts: 'none', 'pnpm', 'turbo', or 'nx'"),
+  testRunner: literalUnion(['vitest', 'other'] as const)
+    .optional()
+    .describe("'vitest', or 'other' for repositories that test with something else"),
   title: z.string().describe("'Title Case' title for the repository"),
   typescript7Alias: z
     .string()
     .optional()
     .describe('dependency name that aliases TypeScript 7 for the tsc binary'),
+  vitestConfigUnowned: z
+    .boolean()
+    .optional()
+    .describe("whether the root Vitest config is the repository's own, not CTM's"),
   vitestConfig: z
     .string()
     .optional()

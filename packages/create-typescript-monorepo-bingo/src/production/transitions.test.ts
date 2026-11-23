@@ -778,11 +778,87 @@ export default config;
       'packages/example/tsdown.config.ts',
       'export default defineConfig({ dts: true });\n',
     );
+    const rootManifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      scripts: Record<string, string>;
+    };
+    delete rootManifest.scripts.build;
+    setFile(files, 'package.json', JSON.stringify(rootManifest, null, 2));
+
+    const creation = transition(files);
+    const scripts = (
+      JSON.parse(getFile(creation.files, 'package.json') ?? '{}') as {
+        scripts: Record<string, string>;
+      }
+    ).scripts;
+
+    expect(getFile(creation.files, 'tsdown.config.ts')).toBeUndefined();
+    expect(scripts.build).toMatch(/^pnpm --recursive .* run build$/);
+    expect(getFile(creation.files, 'packages/example/package.json')).toContain('"build": "tsdown"');
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('packages/example'));
+  });
+
+  it('counts a turbo repository whose packages test with Vitest as using Vitest', () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.test = 'turbo run test';
+    delete manifest.devDependencies.vitest;
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+    const pkg = JSON.parse(getFile(files, 'packages/example/package.json') ?? '{}') as {
+      scripts?: Record<string, string>;
+    };
+    pkg.scripts = { ...pkg.scripts, test: 'vitest run' };
+    setFile(files, 'packages/example/package.json', JSON.stringify(pkg, null, 2));
+
+    expect(
+      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).testRunner,
+    ).toBeUndefined();
+  });
+
+  it('gives a repository testing with something else no Vitest starter test or lint rules', () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.test = 'node --test';
+    delete manifest.devDependencies.vitest;
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+    delete (files as Record<string, unknown>)['eslint.config.ts'];
+
+    const output = transition(files, { newPackage: 'second' }).files;
+
+    expect(getFile(output, 'packages/second/src/greet.ts')).toBeDefined();
+    expect(getFile(output, 'packages/second/src/greet.test.ts')).toBeUndefined();
+    expect(getFile(output, 'eslint.config.ts')).not.toContain('vitest');
+  });
+
+  it('suggests updating an older root tsdown', () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+    };
+    manifest.devDependencies.tsdown = '^0.15.0';
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
 
     const creation = transition(files);
 
-    expect(getFile(creation.files, 'tsdown.config.ts')).toBeUndefined();
-    expect(creation.suggestions).toContainEqual(expect.stringContaining('packages/example'));
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('tsdown ^0.15.0'));
+    expect(getFile(creation.files, 'package.json')).toContain('"tsdown": "^0.15.0"');
+  });
+
+  it("doesn't count a comment mentioning entry as a tsdown entry", () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['tsdown.config.ts'];
+    setFile(
+      files,
+      'packages/example/tsdown.config.ts',
+      "// tsdown's default entry is built.\nexport default defineConfig({ dts: true });\n",
+    );
+
+    expect(getFile(transition(files).files, 'tsdown.config.ts')).toBeUndefined();
   });
 
   it('judges .gitignore coverage the same whether or not outputs are built', () => {

@@ -98,6 +98,7 @@ Options are inferred from an existing repository's files, and prompted for in ne
 | `--releaseApp`            | Prefix of the release GitHub App's `_CLIENT_ID` variable and `_PRIVATE_KEY` secret | `RELEASEBOT_APP`                       |
 | `--scope`                 | npm scope of the private build package                                             | `@<repository>`                        |
 | `--taskRunner`            | `none`, `pnpm`, `turbo` or `nx`                                                    | `none`                                 |
+| `--testRunner`            | `vitest`, or `other` to leave a repository's own test setup alone                  | inferred, else `vitest`                |
 | `--typescript7Alias`      | Dependency name aliasing TypeScript 7                                              | `typescript7`                          |
 | `--workflowExtension`     | `yaml` or `yml`, for GitHub Actions files                                          | `yaml`                                 |
 
@@ -140,6 +141,9 @@ A transition adds what a repository is missing and leaves what it has:
 - Jobs CTM finds in an existing workflow are the repository's: CTM doesn't add steps to them or change their settings, apart from `node-version` matrices.
 - A `.gitignore` entry that would hide existing directories, like `lib/` in a repository with `src/lib` folders, isn't added; a suggestion says so.
 - Switching task runners on an existing repository doesn't replace its existing `build` and `test` scripts.
+- A repository testing with something other than Vitest, like `node --test`, gets no Vitest config, CI test jobs, lint rules or starter tests.
+- An existing `tsdown` older than the one CTM pins is kept, with a suggestion to update it, since new packages' configs spread a base written for CTM's version.
+- If tsdown's workspace mode would skip a package config without its own `entry`, packages build with their own `tsdown` scripts instead of one root `tsdown`.
 - pnpm 12.0.0 or newer is needed.
 
 ## Development

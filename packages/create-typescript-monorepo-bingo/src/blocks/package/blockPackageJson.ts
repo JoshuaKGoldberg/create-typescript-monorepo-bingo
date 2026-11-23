@@ -13,6 +13,7 @@ import {
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatPackageJson, sortKeys } from '../../utils/json.ts';
 import {
+  buildsPerPackage,
   getAuthor,
   getBuildPackageName,
   getRepositoryUrl,
@@ -73,10 +74,18 @@ export const blockPackageJson = packageBase.createBlock({
 
     const existingScripts = existing.scripts as Record<string, string> | undefined;
     // A package's own scripts win; a task runner only adds the ones it needs.
-    const scripts = usesTaskRunner(options)
+    // A repository's own Vitest config may not have CTM's per-package projects, so its
+    // packages run Vitest on their own; other test runners are left to the repository.
+    const test =
+      options.testRunner === 'other'
+        ? undefined
+        : options.vitestConfigUnowned
+          ? 'vitest run'
+          : `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${pkg.directory.split('/').pop() ?? pkg.name}`;
+    const scripts = buildsPerPackage(options)
       ? {
           build: 'tsdown',
-          test: `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}${options.vitestConfig ?? 'vitest.config.ts'} --project ${pkg.directory.split('/').pop() ?? pkg.name}`,
+          ...(usesTaskRunner(options) && test && { test }),
           ...existingScripts,
         }
       : existingScripts;

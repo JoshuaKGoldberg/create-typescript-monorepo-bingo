@@ -50,7 +50,12 @@ export const blockESLint = rootBase.createBlock({
     const existingIgnores = readESLintIgnoresWithSource(existing);
     const extras = readESLintExtras(
       existing,
-      createESLintConfig('', options.workflowExtension ?? defaults.workflowExtension),
+      createESLintConfig(
+        '',
+        options.workflowExtension ?? defaults.workflowExtension,
+        undefined,
+        options.testRunner !== 'other',
+      ),
     );
     return {
       ...(alternate && { alternate }),
@@ -141,7 +146,8 @@ export const blockESLint = rootBase.createBlock({
             '@eslint-community/eslint-plugin-eslint-comments',
             '@eslint/js',
             '@eslint/markdown',
-            '@vitest/eslint-plugin',
+            // Vitest's rules would rewrite other test runners' imports, like node:test's.
+            ...(options.testRunner === 'other' ? [] : ['@vitest/eslint-plugin' as const]),
             'eslint',
             'eslint-plugin-jsdoc',
             'eslint-plugin-jsonc',
@@ -173,7 +179,12 @@ export const blockESLint = rootBase.createBlock({
       files: {
         // A config that doesn't parse is left as it is, rather than lose what can't be read.
         ...(!props.unparseable && {
-          'eslint.config.ts': createESLintConfig(ignoresText, workflowExtension, props.extras),
+          'eslint.config.ts': createESLintConfig(
+            ignoresText,
+            workflowExtension,
+            props.extras,
+            options.testRunner !== 'other',
+          ),
         }),
       },
     });
@@ -214,8 +225,12 @@ function createESLintConfig(
     statements: string[];
     trailing: string[];
   },
+  vitest = true,
 ) {
   const replaced = new Set(extras?.replacedImports);
+  if (!vitest) {
+    replaced.add('@vitest/eslint-plugin');
+  }
   return `${ownedFileMarker}
 
 ${extras?.header.filter((comment) => comment !== ownedFileMarker).length ? `${extras.header.filter((comment) => comment !== ownedFileMarker).join('\n')}\n\n` : ''}${ownImports
@@ -292,7 +307,9 @@ ${extras?.exportComments.length ? `${extras.exportComments.join('\n')}\n` : ''}e
       'markdown/no-missing-label-refs': 'off',
     },
   },
-  // Test only rules
+${
+  vitest
+    ? `  // Test only rules
   {
     extends: [vitest.configs.recommended],
     files: ['**/*.test.*'],
@@ -303,7 +320,9 @@ ${extras?.exportComments.length ? `${extras.exportComments.join('\n')}\n` : ''}e
     },
     settings: { vitest: { typecheck: true } },
   },
-  {
+`
+    : ''
+}  {
     extends: [yml.configs['flat/recommended'], yml.configs['flat/prettier']],
     files: ['**/*.{yml,yaml}'],
     rules: {

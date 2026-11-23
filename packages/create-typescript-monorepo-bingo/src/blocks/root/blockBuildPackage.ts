@@ -1,3 +1,4 @@
+import semver from 'semver';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
@@ -12,6 +13,7 @@ import {
 import { formatJson, formatPackageJson, sortKeys, withDefaults } from '../../utils/json.ts';
 import {
   getBuildPackageName,
+  getPackageFilters,
   getRepositoryUrl,
   getTypeScript7Alias,
   usesTaskRunner,
@@ -105,9 +107,14 @@ export const blockBuildPackage = rootBase.createBlock({
         rootTsdown: readText(files, 'tsdown.config.ts'),
       }).filter(([, text]) => text !== undefined),
     );
-    return { existing };
+    const rootManifest = parseJsonText(readText(files, 'package.json'));
+    const rootTsdownSpecifier = [rootManifest.devDependencies, rootManifest.dependencies]
+      .map((dependencies) => (dependencies as Record<string, string> | undefined)?.tsdown)
+      .find((specifier) => specifier !== undefined);
+    return { existing, ...(rootTsdownSpecifier && { rootTsdownSpecifier }) };
   },
   props: {
+    rootTsdownSpecifier: z.string().optional(),
     existing: z
       .object({
         packageJson: z.string().optional(),
@@ -179,10 +186,18 @@ export const blockBuildPackage = rootBase.createBlock({
     return {
       suggestions: [
         ...(ownsBase ? [] : [describeUnownedFile('packages/build/src/tsdown/base.ts')]),
+        // An existing tsdown is kept, but packages' configs spread a base typed for CTM's.
+        ...(props.rootTsdownSpecifier &&
+        semver.validRange(props.rootTsdownSpecifier) &&
+        !semver.satisfies(pin('tsdown'), props.rootTsdownSpecifier)
+          ? [
+              `The root's tsdown ${props.rootTsdownSpecifier} doesn't include the ${pin('tsdown')} the build package's tsdown base is written for. Update it to ^${pin('tsdown')}, so packages build and typecheck with one tsdown.`,
+            ]
+          : []),
         ...(workspaceReady
           ? []
           : [
-              `tsdown's workspace mode skips package configs without an entry, so a root tsdown build wasn't added. Spread the build package's base, or add an entry, in: ${unready.map((pkg) => pkg.directory).join(', ')}.`,
+              `tsdown's workspace mode skips package configs without an entry, so packages build with their own scripts instead. To build them all with one root tsdown, spread the build package's base, or add an entry, in: ${unready.map((pkg) => pkg.directory).join(', ')}.`,
             ]),
       ],
       extensions: [
@@ -215,7 +230,13 @@ export const blockBuildPackage = rootBase.createBlock({
             [typescript7Alias]: typescript7Specifier(),
           },
           scripts: {
-            ...(!usesTaskRunner(options) && workspaceReady && { build: 'tsdown' }),
+            // Without a task runner, a package tsdown's workspace mode would skip is built
+            // by running every package's own build.
+            ...(!usesTaskRunner(options) && {
+              build: workspaceReady
+                ? 'tsdown'
+                : `pnpm --recursive ${getPackageFilters(options)} run build`,
+            }),
             typecheck: 'tsc -b',
           },
         }),

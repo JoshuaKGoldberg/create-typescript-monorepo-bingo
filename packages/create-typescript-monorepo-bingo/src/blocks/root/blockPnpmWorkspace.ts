@@ -63,7 +63,7 @@ export const blockPnpmWorkspace = rootBase.createBlock({
     // New globs are appended to an existing list, keeping its comments and quoting.
     const packagesNode = document.get('packages');
     if (isSeq(packagesNode)) {
-      for (const glob of globs.slice(existingGlobs.length)) {
+      for (const glob of globs.filter((candidate) => !existingGlobs.includes(candidate))) {
         packagesNode.items.push(document.createNode(glob));
       }
     } else if (globs.length !== existingGlobs.length) {
@@ -191,7 +191,9 @@ function readCatalogEntries(document: Document): CatalogEntry[] {
 
 function readStrings(node: unknown): string[] {
   return isSeq(node)
-    ? node.items.flatMap((item) => (isScalar(item) ? [String(item.value)] : []))
+    ? node.items.flatMap((item) =>
+        isScalar(item) && typeof item.value === 'string' ? [item.value] : [],
+      )
     : [];
 }
 

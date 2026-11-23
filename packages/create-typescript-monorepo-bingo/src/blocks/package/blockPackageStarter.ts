@@ -33,7 +33,9 @@ export const blockPackageStarter = packageBase.createBlock({
         }),
         ...(!props.hasSource && {
           src: {
-            'greet.test.ts': `import { describe, expect, it } from 'vitest';
+            // Other test runners get no starter test, since it's written for Vitest.
+            ...(options.testRunner !== 'other' && {
+              'greet.test.ts': `import { describe, expect, it } from 'vitest';
 
 import { greet } from './greet.ts';
 
@@ -43,6 +45,7 @@ describe(greet, () => {
   });
 });
 `,
+            }),
             'greet.ts': `/**
  * Creates a greeting for a name.
  * @param name Who to greet.
