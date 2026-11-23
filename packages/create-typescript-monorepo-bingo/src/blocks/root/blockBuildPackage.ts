@@ -189,7 +189,7 @@ export const blockBuildPackage = rootBase.createBlock({
         // An existing tsdown is kept, but packages' configs spread a base typed for CTM's.
         ...(props.rootTsdownSpecifier &&
         semver.validRange(props.rootTsdownSpecifier) &&
-        !semver.satisfies(pin('tsdown'), props.rootTsdownSpecifier)
+        semver.lt(semver.minVersion(props.rootTsdownSpecifier) ?? pin('tsdown'), pin('tsdown'))
           ? [
               `The root's tsdown ${props.rootTsdownSpecifier} doesn't include the ${pin('tsdown')} the build package's tsdown base is written for. Update it to ^${pin('tsdown')}, so packages build and typecheck with one tsdown.`,
             ]

@@ -15,6 +15,7 @@ export type PackageKind = (typeof packageKinds)[number];
 export const packageSpecSchema = z.object({
   description: z.string().optional(),
   directory: z.string(),
+  homepage: z.string().optional(),
   isolatedDeclarations: z.boolean().optional(),
   kind: z.enum(packageKinds),
   name: z.string(),

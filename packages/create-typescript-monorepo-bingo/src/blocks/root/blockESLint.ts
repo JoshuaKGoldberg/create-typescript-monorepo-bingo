@@ -50,12 +50,9 @@ export const blockESLint = rootBase.createBlock({
     const existingIgnores = readESLintIgnoresWithSource(existing);
     const extras = readESLintExtras(
       existing,
-      createESLintConfig(
-        '',
-        options.workflowExtension ?? defaults.workflowExtension,
-        undefined,
-        options.testRunner !== 'other',
-      ),
+      // Compared with CTM's full config, so its Vitest entries aren't kept as the
+      // repository's own when a repository stops using Vitest.
+      createESLintConfig('', options.workflowExtension ?? defaults.workflowExtension),
     );
     return {
       ...(alternate && { alternate }),

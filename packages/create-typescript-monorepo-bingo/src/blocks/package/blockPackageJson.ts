@@ -72,6 +72,12 @@ export const blockPackageJson = packageBase.createBlock({
       resolved[field] = sortKeys(result.dependencies);
     }
 
+    const homepages = new Set(
+      (options.packages ?? [])
+        .filter((other) => other.kind === 'library' && other.directory !== pkg.directory)
+        .map((other) => other.homepage),
+    );
+    const [sharedHomepage] = homepages.size === 1 ? [...homepages] : [];
     const existingScripts = existing.scripts as Record<string, string> | undefined;
     // A package's own scripts win; a task runner only adds the ones it needs.
     // A repository's own Vitest config may not have CTM's per-package projects, so its
@@ -100,6 +106,8 @@ export const blockPackageJson = packageBase.createBlock({
           },
           license: 'MIT',
           author: getAuthor(options),
+          // A homepage every other library shares, like a project website, is shared too.
+          ...(sharedHomepage && { homepage: sharedHomepage }),
           sideEffects: false,
           type: 'module',
           exports: {

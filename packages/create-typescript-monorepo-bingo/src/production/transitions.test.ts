@@ -948,4 +948,49 @@ export default config;
       prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).testRunner,
     ).toBe('other');
   });
+
+  it("drops Vitest lint rules from CTM's own ESLint config when a repository stops using Vitest", () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.test = 'node --test';
+    delete manifest.devDependencies.vitest;
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    applyFiles(files, transition(files).files);
+
+    expect(getFile(files, 'eslint.config.ts')).not.toContain('vitest');
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it("doesn't suggest updating a root tsdown newer than CTM's", () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+    };
+    manifest.devDependencies.tsdown = '0.99.0';
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    expect(transition(files).suggestions).not.toContainEqual(
+      expect.stringContaining('tsdown 0.99.0'),
+    );
+  });
+
+  it('gives a new package the homepage its sibling libraries share', () => {
+    const files = createRepository();
+    const pkg = JSON.parse(getFile(files, 'packages/example/package.json') ?? '{}') as Record<
+      string,
+      unknown
+    >;
+    pkg.homepage = 'https://example.dev';
+    setFile(files, 'packages/example/package.json', JSON.stringify(pkg, null, 2));
+
+    const output = transition(files, { newPackage: 'second' }).files;
+
+    expect(getFile(output, 'packages/second/package.json')).toContain(
+      '"homepage": "https://example.dev"',
+    );
+  });
 });

@@ -15,6 +15,7 @@ export interface PackageManifest {
   description?: string;
   devDependencies?: Record<string, string>;
   engines?: { node?: string };
+  homepage?: string;
   name?: string;
   packageManager?: string;
   private?: boolean;
@@ -211,6 +212,7 @@ function createPackageSpec(pkg: WorkspacePackage, all: WorkspacePackage[]): Pack
   return {
     ...(pkg.manifest.description && { description: pkg.manifest.description }),
     directory: pkg.directory,
+    ...(pkg.manifest.homepage && { homepage: pkg.manifest.homepage }),
     ...(tsconfig?.compilerOptions?.isolatedDeclarations && { isolatedDeclarations: true }),
     // tsdown's workspace mode skips package configs without an entry of their own.
     ...(!isTsdownWorkspaceReady(readText(pkg.files, 'tsdown.config.ts')) && {
