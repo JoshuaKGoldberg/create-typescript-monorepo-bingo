@@ -26,6 +26,7 @@ export interface NpmAlias {
 export function isProtocolSpecifier(specifier: string): boolean {
   return (
     protocolPrefixes.some((prefix) => specifier.startsWith(prefix)) ||
+    /^(?:git@|gitlab:|bitbucket:|ssh:\/\/|git\+ssh:)/.test(specifier) ||
     /^(?:\.{0,2}\/|~\/)/.test(specifier) ||
     specifier.endsWith('.tgz') ||
     /^[\w.-]+\/[\w.-]+(?:#.*)?$/.test(specifier)
@@ -78,13 +79,23 @@ export function resolveSpecifier(
 
   if (existingAlias || oursAlias) {
     if (existingAlias?.name !== oursAlias?.name) {
-      return ours;
+      // A different target, like \`typescript\` becoming the TypeScript 6 wrapper, wins
+      // unless what's on disk is a newer major version, which it would downgrade.
+      return isNewerMajor(existingAlias?.range ?? existing, oursAlias?.range ?? ours)
+        ? existing
+        : ours;
     }
 
     return isUpgrade(existingAlias?.range, oursAlias?.range) ? ours : existing;
   }
 
   return isUpgrade(existing, ours) ? ours : existing;
+}
+
+function isNewerMajor(existing: string, ours: string) {
+  const existingMinimum = minimumVersion(existing);
+  const oursMinimum = minimumVersion(ours);
+  return !!existingMinimum && !!oursMinimum && existingMinimum.major > oursMinimum.major;
 }
 
 /**
@@ -134,10 +145,9 @@ function isUpgrade(baseline: string | undefined, candidate: string | undefined):
     return false;
   }
 
-  return (
-    !semver.satisfies(candidateMinimum, baseline, { includePrerelease: true }) &&
-    semver.gt(candidateMinimum, baselineMinimum)
-  );
+  // Only an upgrade if the baseline allows no version as high: \`^5 || ^27\` already
+  // allows newer versions than 26, so it isn't replaced by 26.
+  return semver.gtr(candidateMinimum, baseline, { includePrerelease: true });
 }
 
 function hasLargerMinimum(candidate: string | undefined, baseline: string | undefined) {

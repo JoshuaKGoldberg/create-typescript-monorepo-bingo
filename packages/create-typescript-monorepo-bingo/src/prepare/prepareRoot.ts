@@ -65,7 +65,10 @@ export function prepareRoot(
     ...(author?.email && { email: author.email }),
     catalogs,
     ...(catalogs === 'default' && {
-      catalogShared: findSharedDependencies(manifests, workspace?.catalog),
+      catalogShared: findSharedDependencies(manifests, {
+        ...workspace?.catalog,
+        ...workspace?.catalogs?.default,
+      }),
     }),
     ...(catalogs === 'named' && {
       catalogExcluded: findNamedConflicts(manifests, workspace?.catalogs),
@@ -213,11 +216,14 @@ function getAllDependencies(manifest: PackageManifest): Record<string, string> {
 }
 
 function inferCatalogMode(workspace: undefined | WorkspaceYaml): CatalogMode {
-  if (workspace?.catalogs && Object.keys(workspace.catalogs).length) {
+  // catalogs.default is another way to write the default catalog.
+  if (Object.keys(workspace?.catalogs ?? {}).some((name) => name !== 'default')) {
     return 'named';
   }
 
-  return workspace?.catalog && Object.keys(workspace.catalog).length ? 'default' : 'none';
+  return Object.keys({ ...workspace?.catalog, ...workspace?.catalogs?.default }).length
+    ? 'default'
+    : 'none';
 }
 
 interface ManifestWithKind {

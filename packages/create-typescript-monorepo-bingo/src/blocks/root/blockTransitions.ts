@@ -55,6 +55,12 @@ export const blockTransitions = rootBase.createBlock({
               run: `${command} --mode transition --offline --skip-requests`,
             },
             {
+              // CI installs with a frozen lockfile, so the transition's own install can't
+              // update it; this does, then formats what it changed.
+              name: 'Update Lockfile',
+              run: 'pnpm install --no-frozen-lockfile && pnpm format',
+            },
+            {
               name: 'Create Token',
               id: 'create_token',
               uses: action('actions/create-github-app-token'),
@@ -62,6 +68,8 @@ export const blockTransitions = rootBase.createBlock({
                 'client-id': `\${{ vars.${app}_CLIENT_ID }}`,
                 'permission-contents': 'write',
                 'permission-pull-requests': 'write',
+                // Transitions can change files in .github/workflows.
+                'permission-workflows': 'write',
                 'private-key': `\${{ secrets.${app}_PRIVATE_KEY }}`,
               },
             },

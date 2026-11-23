@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
-import { parseJsonText, readText } from '../../utils/files.ts';
+import {
+  findAlternateConfig,
+  parseJsonText,
+  readText,
+  withoutAlternate,
+} from '../../utils/files.ts';
 import { formatJson } from '../../utils/json.ts';
 
 const rangeStrategiesByCatalog: Record<string, string> = {
@@ -23,10 +28,15 @@ export const blockRenovate = rootBase.createBlock({
     name: 'Renovate',
   },
   intake({ files }) {
-    const existing = readText(files, '.github/renovate.json');
-    return existing === undefined ? undefined : { existing };
+    const alternate = findAlternateConfig(files, 'renovate');
+    const fromFiles = ((): object | undefined => {
+      const existing = readText(files, '.github/renovate.json');
+      return existing === undefined ? undefined : { existing };
+    })();
+    return alternate ? { ...fromFiles, alternate } : fromFiles;
   },
   props: {
+    alternate: z.string().optional(),
     existing: z.string().optional(),
   },
   produce({ options, props }) {
@@ -43,7 +53,7 @@ export const blockRenovate = rootBase.createBlock({
       }
     }
 
-    return {
+    return withoutAlternate(props.alternate, '.github/renovate.json', {
       files: {
         '.github': {
           'renovate.json': formatJson(
@@ -61,6 +71,6 @@ export const blockRenovate = rootBase.createBlock({
           ),
         },
       },
-    };
+    });
   },
 });

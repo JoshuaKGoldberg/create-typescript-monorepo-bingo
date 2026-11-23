@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
-import { readText } from '../../utils/files.ts';
+import { findAlternateConfig, readText, withoutAlternate } from '../../utils/files.ts';
 import { mergeList } from '../../utils/lists.ts';
 import { pinned } from '../../utils/pins.ts';
 import {
@@ -23,10 +23,15 @@ export const blockKnip = rootBase.createBlock({
     name: 'Knip',
   },
   intake({ files }) {
-    const existing = readText(files, 'knip.config.ts');
-    return existing === undefined ? undefined : { existing };
+    const alternate = findAlternateConfig(files, 'knip');
+    const fromFiles = ((): object | undefined => {
+      const existing = readText(files, 'knip.config.ts');
+      return existing === undefined ? undefined : { existing };
+    })();
+    return alternate ? { ...fromFiles, alternate } : fromFiles;
   },
   props: {
+    alternate: z.string().optional(),
     existing: z.string().optional(),
     ignoreDependencies: z.array(z.string()).optional(),
     workspaces: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
@@ -66,7 +71,7 @@ export const blockKnip = rootBase.createBlock({
       ),
     };
 
-    return {
+    return withoutAlternate(props.alternate, 'knip.config.ts', {
       extensions: [
         blockGitHubActionsCI({
           jobs: [{ id: 'knip', name: 'Knip', steps: [{ run: 'pnpm knip' }] }],
@@ -86,6 +91,6 @@ const config: KnipConfig = ${printStatic(config, readConfigLayout(props.existing
 export default config;
 `,
       },
-    };
+    });
   },
 });

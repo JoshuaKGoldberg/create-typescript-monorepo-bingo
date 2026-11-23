@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
 import { action } from '../../utils/actions.ts';
+import { findAlternateConfig, withoutAlternate } from '../../utils/files.ts';
 import { getPackageParents, usesTaskRunner } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import { blockGitHubActionsCI, getNodeVersionsMatrix } from './blockGitHubActionsCI.ts';
@@ -18,7 +19,12 @@ export const blockVitest = rootBase.createBlock({
   about: {
     name: 'Vitest',
   },
+  intake({ files }) {
+    const alternate = findAlternateConfig(files, 'vitest');
+    return alternate ? { alternate } : undefined;
+  },
   props: {
+    alternate: z.string().optional(),
     coverageExclude: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
@@ -26,7 +32,7 @@ export const blockVitest = rootBase.createBlock({
       .map((exclude) => `'${exclude}'`)
       .join(', ');
 
-    return {
+    return withoutAlternate(props.alternate, 'vitest.config.ts', {
       extensions: [
         blockGitHubActionsCI({
           jobs: [
@@ -102,7 +108,7 @@ export const blockVitest = rootBase.createBlock({
       files: {
         'vitest.config.ts': createVitestConfig(getPackageParents(options), coverageExclude),
       },
-    };
+    });
   },
 });
 

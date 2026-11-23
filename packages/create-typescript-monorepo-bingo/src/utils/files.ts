@@ -73,3 +73,95 @@ export function parseJsonText(
 
   return value as Record<string, unknown>;
 }
+
+/**
+ * Other file names tools read their config from, which CTM doesn't write itself.
+ * If a repository uses one, CTM leaves it alone rather than add a second, competing file.
+ */
+export const alternateConfigFiles = {
+  cspell: [
+    '.cspell.json',
+    'cSpell.json',
+    'cspell.config.json',
+    'cspell.config.yaml',
+    'cspell.yaml',
+  ],
+  eslint: [
+    '.eslintrc.cjs',
+    '.eslintrc.js',
+    '.eslintrc.json',
+    'eslint.config.cjs',
+    'eslint.config.js',
+    'eslint.config.mjs',
+    'eslint.config.mts',
+  ],
+  knip: [
+    '.knip.json',
+    '.knip.jsonc',
+    'knip.config.js',
+    'knip.config.mjs',
+    'knip.json',
+    'knip.jsonc',
+    'knip.ts',
+  ],
+  oxfmt: ['.oxfmtrc.json', '.oxfmtrc.jsonc', 'oxfmt.config.js', 'oxfmt.config.mjs'],
+  renovate: [
+    '.github/renovate.json5',
+    '.renovaterc',
+    '.renovaterc.json',
+    '.renovaterc.json5',
+    'renovate.json',
+    'renovate.json5',
+  ],
+  vitest: ['vitest.config.js', 'vitest.config.mjs', 'vitest.config.mts'],
+} as const;
+
+/**
+ * Finds which alternate config file, if any, a repository has for a tool.
+ */
+export function findAlternateConfig(
+  files: IntakeDirectory | undefined,
+  tool: keyof typeof alternateConfigFiles,
+): string | undefined {
+  return alternateConfigFiles[tool].find((name) => getEntry(files, name) !== undefined);
+}
+
+/**
+ * Creates the suggestion shown when CTM leaves an alternate config file alone.
+ */
+function describeAlternateConfig(alternate: string, ours: string): string {
+  return `Found ${alternate}, so ${ours} wasn't written. Move its settings to ${ours} and delete it to have create-typescript-monorepo-bingo manage it.`;
+}
+
+/**
+ * Drops a file from a Block's creation when the repository uses an alternate config file,
+ * and suggests how to move to CTM's.
+ */
+export function withoutAlternate<Creation extends { files?: object; suggestions?: string[] }>(
+  alternate: string | undefined,
+  filePath: string,
+  creation: Creation,
+): Creation {
+  if (!alternate || !creation.files) {
+    return creation;
+  }
+
+  const files = structuredClone(creation.files) as Record<string, unknown>;
+  const segments = filePath.split('/');
+  const fileName = segments.pop() ?? filePath;
+  let directory: Record<string, unknown> | undefined = files;
+  for (const segment of segments) {
+    directory = directory[segment] as Record<string, unknown> | undefined;
+    if (!directory) {
+      return creation;
+    }
+  }
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete directory[fileName];
+
+  return {
+    ...creation,
+    files,
+    suggestions: [...(creation.suggestions ?? []), describeAlternateConfig(alternate, filePath)],
+  };
+}

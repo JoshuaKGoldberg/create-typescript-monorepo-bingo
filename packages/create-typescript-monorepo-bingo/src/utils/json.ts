@@ -37,6 +37,24 @@ function editJsonc(text: string, value: unknown): string {
       return;
     }
 
+    // Arrays are edited by index, so comments between existing items are kept.
+    if (Array.isArray(before) && Array.isArray(after)) {
+      for (let index = before.length - 1; index >= after.length; index -= 1) {
+        result = applyEdits(result, modify(result, [...path, index], undefined, editOptions));
+      }
+      for (const [index, item] of after.entries()) {
+        if (index < before.length) {
+          visit([...path, index], before[index], item);
+        } else {
+          result = applyEdits(
+            result,
+            modify(result, [...path, index], item, { ...editOptions, isArrayInsertion: true }),
+          );
+        }
+      }
+      return;
+    }
+
     if (!isDeepStrictEqual(before, after)) {
       result = applyEdits(result, modify(result, path, after, editOptions));
     }

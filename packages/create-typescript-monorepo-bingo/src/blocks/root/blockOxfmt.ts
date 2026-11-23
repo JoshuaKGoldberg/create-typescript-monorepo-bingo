@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
-import { readText } from '../../utils/files.ts';
+import { findAlternateConfig, readText, withoutAlternate } from '../../utils/files.ts';
 import { mergeList } from '../../utils/lists.ts';
 import { getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
@@ -28,10 +28,15 @@ export const blockOxfmt = rootBase.createBlock({
     name: 'Oxfmt',
   },
   intake({ files }) {
-    const existing = readText(files, 'oxfmt.config.ts');
-    return existing === undefined ? undefined : { existing };
+    const alternate = findAlternateConfig(files, 'oxfmt');
+    const fromFiles = ((): object | undefined => {
+      const existing = readText(files, 'oxfmt.config.ts');
+      return existing === undefined ? undefined : { existing };
+    })();
+    return alternate ? { ...fromFiles, alternate } : fromFiles;
   },
   props: {
+    alternate: z.string().optional(),
     existing: z.string().optional(),
     ignorePatterns: z.array(z.string()).optional(),
   },
@@ -64,7 +69,7 @@ export const blockOxfmt = rootBase.createBlock({
       Object.entries(config).sort(([a], [b]) => a.localeCompare(b)),
     );
 
-    return {
+    return withoutAlternate(props.alternate, 'oxfmt.config.ts', {
       extensions: [
         blockGitHubActionsCI({
           jobs: [
@@ -95,7 +100,7 @@ const config: OxfmtConfig = defineConfig(${printStatic(sorted, readConfigLayout(
 export default config;
 `,
       },
-    };
+    });
   },
   setup() {
     return { scripts: [{ commands: ['pnpm format'], phase: 1 }] };

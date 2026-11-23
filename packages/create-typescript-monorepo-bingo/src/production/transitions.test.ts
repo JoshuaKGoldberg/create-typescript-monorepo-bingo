@@ -232,4 +232,165 @@ export default config;
     expect(getFile(files, 'pnpm-workspace.yaml')).toContain("'@types/node':");
     expect(getFile(files, 'packages/example/package.json')).toContain('"@types/node": "catalog:"');
   });
+
+  it('keeps trigger settings that CTM writes as empty', () => {
+    const files = createRepository();
+    const ci = getFile(files, '.github/workflows/ci.yaml') ?? '';
+    setFile(
+      files,
+      '.github/workflows/ci.yaml',
+      ci.replace('pull_request: ~', "pull_request:\n    paths-ignore:\n      - 'docs/**'"),
+    );
+
+    expect(getFile(transition(files).files, '.github/workflows/ci.yaml')).toContain(
+      "paths-ignore:\n      - 'docs/**'",
+    );
+  });
+
+  it('keeps triggers written as a list', () => {
+    const files = createRepository();
+    const ci = getFile(files, '.github/workflows/ci.yaml') ?? '';
+    setFile(
+      files,
+      '.github/workflows/ci.yaml',
+      ci.replace(/on:\n(?: {2}.*\n)+/, 'on: [pull_request, push, merge_group]\n'),
+    );
+
+    expect(getFile(transition(files).files, '.github/workflows/ci.yaml')).toContain('merge_group');
+  });
+
+  it('keeps newer and SHA-pinned action versions', () => {
+    const files = createRepository();
+    const release = getFile(files, '.github/workflows/release.yaml') ?? '';
+    setFile(
+      files,
+      '.github/workflows/release.yaml',
+      release
+        .replaceAll(
+          'actions/create-github-app-token@v3.3.0',
+          'actions/create-github-app-token@v4.0.0',
+        )
+        .replace(
+          'actions/checkout@v7.0.1',
+          'actions/checkout@0123456789abcdef0123456789abcdef01234567 # v7.0.2',
+        ),
+    );
+
+    const output = getFile(transition(files).files, '.github/workflows/release.yaml');
+
+    expect(output).toContain('actions/create-github-app-token@v4.0.0');
+    expect(output).toContain('actions/checkout@0123456789abcdef0123456789abcdef01234567 # v7.0.2');
+  });
+
+  it('keeps a hand-edited schedule and follows engines in matrices', () => {
+    const files = createRepository();
+    const transitions = getFile(files, '.github/workflows/transitions.yaml') ?? '';
+    setFile(
+      files,
+      '.github/workflows/transitions.yaml',
+      transitions
+        .replace("cron: '0 6 * * 1'", "cron: '0 3 1 * *'")
+        .replace('cron: 0 6 * * 1', "cron: '0 3 1 * *'"),
+    );
+
+    const output = transition(files, { nodeEngines: '>=24.15.0' }).files;
+
+    expect(getFile(output, '.github/workflows/transitions.yaml')).not.toContain('0 6 * * 1');
+    expect(getFile(output, '.github/workflows/ci.yaml')).not.toContain('22.22.2');
+  });
+
+  it('keeps comments inside JSONC arrays when adding items', () => {
+    const files = createRepository();
+    setFile(
+      files,
+      '.vscode/extensions.json',
+      `{
+  "recommendations": [
+    // our team's spell checker
+    "streetsidesoftware.code-spell-checker",
+  ],
+}
+`,
+    );
+
+    const output = getFile(transition(files).files, '.vscode/extensions.json');
+
+    expect(output).toContain("// our team's spell checker");
+    expect(output).toContain('dbaeumer.vscode-eslint');
+  });
+
+  it('keeps ESLint entries that look like CTM entries, and what extra entries use', () => {
+    const files = createRepository();
+    const config = getFile(files, 'eslint.config.ts') ?? '';
+    setFile(
+      files,
+      'eslint.config.ts',
+      `// @ts-check\n${config
+        .replace(
+          "import tseslint from 'typescript-eslint';",
+          "import tseslint from 'typescript-eslint';\n\nconst scriptGlobs = ['scripts/**/*.ts'];",
+        )
+        .replace(
+          /\);\n$/,
+          "  { files: ['**/*.json'], rules: { 'jsonc/sort-keys': 'error' } },\n  { ignores: ['generated/**'] },\n  { files: scriptGlobs, rules: {} },\n);\n",
+        )}`,
+    );
+
+    const output = getFile(transition(files).files, 'eslint.config.ts') ?? '';
+
+    expect(output.startsWith('// @ts-check')).toBe(true);
+    expect(output).toContain("const scriptGlobs = ['scripts/**/*.ts'];");
+    expect(output).toContain("rules: { 'jsonc/sort-keys': 'error' }");
+    expect(output).toContain("{ ignores: ['generated/**'] }");
+    expect(output).toContain('{ files: scriptGlobs, rules: {} }');
+  });
+
+  it('keeps entries of an ESLint config exported through a variable', () => {
+    const files = createRepository();
+    const config = getFile(files, 'eslint.config.ts') ?? '';
+    setFile(
+      files,
+      'eslint.config.ts',
+      config
+        .replace('export default defineConfig(', 'const config = defineConfig(')
+        .replace(
+          /\);\n$/,
+          "  { rules: { 'no-console': 'error' } },\n);\n\nexport default config;\n",
+        ),
+    );
+
+    expect(getFile(transition(files).files, 'eslint.config.ts')).toContain("'no-console': 'error'");
+  });
+
+  it('writes the default catalog where it already is', () => {
+    const files = createRepository({ catalogs: 'default' });
+    const workspace = getFile(files, 'pnpm-workspace.yaml') ?? '';
+    setFile(
+      files,
+      'pnpm-workspace.yaml',
+      workspace
+        .replace('catalog:\n', 'catalogs:\n  default:\n')
+        .replaceAll(/^ {2}('@types|tsdown|typescript)/gm, '    $1'),
+    );
+
+    const output = getFile(transition(files).files, 'pnpm-workspace.yaml') ?? '';
+
+    expect(output).not.toMatch(/^catalog:/m);
+    expect(output).not.toContain('dev:');
+  });
+
+  it('leaves alternate config files alone instead of adding competing ones', () => {
+    const files = createRepository();
+    const configs = files as Record<string, unknown>;
+    delete configs['eslint.config.ts'];
+    delete (configs['.github'] as Record<string, unknown>)['renovate.json'];
+    setFile(files, 'eslint.config.mjs', 'export default [];\n');
+    setFile(files, '.github/renovate.json5', '{ automerge: false }\n');
+
+    const creation = transition(files);
+
+    expect(getFile(creation.files, 'eslint.config.ts')).toBeUndefined();
+    expect(getFile(creation.files, '.github/renovate.json')).toBeUndefined();
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('eslint.config.mjs'));
+  });
 });

@@ -293,75 +293,166 @@ function visit(node: unknown, callback: (node: AstNode) => void) {
 
 export interface ESLintExtras {
   /**
-   * Config array entries CTM doesn't produce, as source text.
+   * Config array entries CTM doesn't produce, as source text with their comments.
    */
   configs: string[];
 
   /**
-   * Import declarations from modules CTM doesn't import, as source text.
+   * Comments at the start of the file, such as a TypeScript check directive.
+   */
+  header: string[];
+
+  /**
+   * Import declarations that aren't exactly one of CTM's, as source text.
    */
   imports: string[];
+
+  /**
+   * Other top-level statements, such as variables the extra configs use, as source text.
+   */
+  statements: string[];
 }
 
+type SpannedNode = AstNode & { end: number; start: number };
+
 /**
- * Finds what a repository added to a flat ESLint config made by CTM: entries of
- * `defineConfig(...)` whose `files` (or shape) don't match one of CTM's, and imports
- * of other modules. Comments directly before an entry are kept with it.
+ * Finds what a repository added to a flat ESLint config made by CTM. CTM's own entries are
+ * matched by their `files` and keys, at most once each; every other entry, import and
+ * top-level statement is kept, along with comments before them.
  */
 export function readESLintExtras(
   sourceText: string | undefined,
-  ownSignatures: ReadonlySet<string>,
-  ownModules: ReadonlySet<string>,
+  ownSource: string,
 ): ESLintExtras | undefined {
   if (sourceText === undefined) {
     return undefined;
   }
 
-  const { errors, program } = parseSync('eslint.config.ts', sourceText);
-  if (errors.length) {
+  const parsed = parseSync('eslint.config.ts', sourceText);
+  if (parsed.errors.length) {
     return undefined;
   }
 
-  const body = program.body as unknown as (AstNode & { end: number; start: number })[];
-  const imports = body
-    .filter(
-      (node) =>
-        node.type === 'ImportDeclaration' &&
-        !ownModules.has((node.source as { value: string }).value),
-    )
-    .map((node) => sourceText.slice(node.start, node.end));
+  const body = parsed.program.body as unknown as SpannedNode[];
+  const own = parseSync('eslint.config.ts', ownSource);
+  const ownBody = own.program.body as unknown as SpannedNode[];
+  const ownImports = new Set(
+    ownBody
+      .filter((node) => node.type === 'ImportDeclaration')
+      .map((node) => normalize(ownSource.slice(node.start, node.end))),
+  );
+  const remaining = getConfigArgs(ownBody).map(getESLintConfigSignature);
 
-  const exported = body.find((node) => node.type === 'ExportDefaultDeclaration')?.declaration as
-    | AstNode
-    | undefined;
-  const args =
-    exported?.type === 'CallExpression'
-      ? (exported.arguments as (AstNode & { end: number; start: number })[])
-      : exported?.type === 'ArrayExpression'
-        ? (exported.elements as (AstNode & { end: number; start: number })[])
-        : [];
+  const exported = body.find((node) => node.type === 'ExportDefaultDeclaration');
+  const declaration = exported?.declaration as SpannedNode | undefined;
+  const configDeclaration =
+    declaration?.type === 'Identifier'
+      ? findDeclaration(body, declaration.name as string)
+      : undefined;
 
+  const firstStart = body[0]?.start ?? sourceText.length;
+  const header = (parsed.comments as unknown as SpannedNode[])
+    .filter((comment) => comment.end <= firstStart)
+    .map((comment) => sourceText.slice(comment.start, comment.end));
+
+  const imports: string[] = [];
+  const statements: string[] = [];
+  for (const node of body) {
+    const text = sourceText.slice(node.start, node.end);
+    if (node.type === 'ImportDeclaration') {
+      if (!ownImports.has(normalize(text))) {
+        imports.push(text);
+      }
+    } else if (node !== exported && node !== configDeclaration) {
+      statements.push(text);
+    }
+  }
+
+  const args = getConfigArgs(body);
   const configs: string[] = [];
   let previousEnd = args[0]?.start ?? 0;
 
   for (const arg of args) {
-    const leading = sourceText.slice(previousEnd, arg.start).replace(/^\s*,/, '');
-    const comments = leading
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith('//') || line.startsWith('/*') || line.startsWith('*'));
+    const comments = getComments(sourceText.slice(previousEnd, arg.start));
     previousEnd = arg.end;
 
-    if (!ownSignatures.has(getESLintConfigSignature(arg))) {
+    const index = remaining.indexOf(getESLintConfigSignature(arg));
+    if (index === -1) {
       configs.push([...comments, sourceText.slice(arg.start, arg.end)].join('\n  '));
+    } else {
+      remaining.splice(index, 1);
     }
   }
 
-  return { configs, imports };
+  // Comments after the last entry, before the closing parenthesis or bracket.
+  const container = getConfigContainer(body);
+  if (container && args.length) {
+    const trailing = getComments(sourceText.slice(previousEnd, container.end - 1));
+    if (trailing.length) {
+      configs.push(trailing.join('\n  '));
+    }
+  }
+
+  return { configs, header, imports, statements };
+}
+
+function getComments(between: string) {
+  const comments: string[] = [];
+  for (const match of between.matchAll(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g)) {
+    comments.push(match[0]);
+  }
+  return comments;
+}
+
+function normalize(text: string) {
+  return text.replaceAll(/\s+/g, ' ').replaceAll('"', "'").replace(/;$/, '').trim();
+}
+
+function findDeclaration(body: SpannedNode[], name: string): SpannedNode | undefined {
+  return body.find(
+    (node) =>
+      node.type === 'VariableDeclaration' &&
+      (node.declarations as AstNode[]).some(
+        (declarator) => (declarator.id as AstNode).name === name,
+      ),
+  );
+}
+
+function getConfigContainer(body: SpannedNode[]): SpannedNode | undefined {
+  const exported = body.find((node) => node.type === 'ExportDefaultDeclaration')?.declaration as
+    | SpannedNode
+    | undefined;
+  let container = exported;
+
+  if (container?.type === 'Identifier') {
+    const declaration = findDeclaration(body, container.name as string);
+    const declarator = (declaration?.declarations as AstNode[] | undefined)?.find(
+      (candidate) => (candidate.id as AstNode).name === container?.name,
+    );
+    container = declarator?.init as SpannedNode | undefined;
+  }
+
+  while (
+    container &&
+    (container.type === 'TSAsExpression' || container.type === 'TSSatisfiesExpression')
+  ) {
+    container = container.expression as SpannedNode;
+  }
+
+  return container;
+}
+
+function getConfigArgs(body: SpannedNode[]): SpannedNode[] {
+  const container = getConfigContainer(body);
+  if (container?.type === 'CallExpression') {
+    return container.arguments as SpannedNode[];
+  }
+
+  return container?.type === 'ArrayExpression' ? (container.elements as SpannedNode[]) : [];
 }
 
 /**
- * Identifies a flat config entry by its `files`, or by its only key.
+ * Identifies a flat config entry by its `files` and the keys it has.
  */
 function getESLintConfigSignature(node: AstNode): string {
   if (node.type !== 'ObjectExpression') {
@@ -372,24 +463,11 @@ function getESLintConfigSignature(node: AstNode): string {
   const files = properties.find(
     (property) => property.type === 'Property' && getKeyName(property.key as AstNode) === 'files',
   );
-  if (files) {
-    return `files:${JSON.stringify(evaluate(files.value as AstNode) ?? null)}`;
-  }
+  const keys = properties
+    .map((property) =>
+      property.type === 'Property' ? getKeyName(property.key as AstNode) : property.type,
+    )
+    .sort();
 
-  const keys = properties.map((property) =>
-    property.type === 'Property' ? getKeyName(property.key as AstNode) : property.type,
-  );
-  return `keys:${keys.join(',')}`;
-}
-
-/**
- * Gets the signatures of every entry in a flat ESLint config's source.
- */
-export function readESLintSignatures(sourceText: string): Set<string> {
-  const { program } = parseSync('eslint.config.ts', sourceText);
-  const exported = (program.body as unknown as AstNode[]).find(
-    (node) => node.type === 'ExportDefaultDeclaration',
-  )?.declaration as AstNode | undefined;
-  const args = exported?.type === 'CallExpression' ? (exported.arguments as AstNode[]) : [];
-  return new Set(args.map(getESLintConfigSignature));
+  return `files:${JSON.stringify(files ? (evaluate(files.value as AstNode) ?? null) : null)};keys:${keys.join(',')}`;
 }

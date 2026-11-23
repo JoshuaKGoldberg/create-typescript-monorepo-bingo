@@ -87,6 +87,8 @@ Options are inferred from an existing repository's files, and prompted for in ne
 | `--title`                 | Title Case title for the repository                                                | (prompted)                             |
 | `--description`           | Sentence-case description of the repository                                        | (prompted)                             |
 | `--author`, `--email`     | Author for `package.json` files                                                    | from the root manifest                 |
+| `--catalogExcluded`       | `<catalog>:<dependency>` pairs to keep out of catalogs                             | inferred                               |
+| `--catalogShared`         | Dependencies to put in the default catalog                                         | inferred                               |
 | `--catalogs`              | `none`, `default` or `named`                                                       | `default` for new repos                |
 | `--newPackage`            | Name of a package to add under `packages/`                                         |                                        |
 | `--newPackageDescription` | Description of the `--newPackage`                                                  |                                        |
@@ -121,14 +123,28 @@ Beyond that, each file is handled one of three ways:
 - **Owned:** the shared `packages/build` configs and `vitest.config.ts` are CTM's, and are how config stays in sync across repositories.
 - **Repository-owned:** docs, README files, starter sources, a docs site package, and anything CTM doesn't know about are created when missing and never touched again.
 
-To override inferred options, such as a package's `kind`, add a `create-typescript-monorepo-bingo.config.ts` that default-exports `createConfig({ options: { ... } })`.
+To override inferred options, such as a package's `kind`, install the template as a devDependency (`pnpm add -D create-typescript-monorepo-bingo`) and add a `create-typescript-monorepo-bingo.config.ts`:
+
+```ts
+import { createConfig } from 'create-typescript-monorepo-bingo';
+
+export default createConfig({
+  options: {
+    // ...
+  },
+});
+```
 
 ### Limitations
 
 - Workspace globs must be single-level (`packages/*`) or exact directories.
 - Packages that aren't built with tsdown are detected as repository-owned and left alone.
 - In named catalog mode, dependencies with different versions across packages stay out of catalogs, with a suggestion printed; stray default-catalog entries are kept as they are.
-- Lists in merged YAML files are combined, so a matrix entry or branch CTM no longer produces stays until removed by hand.
+- CI matrices follow `engines.node` and are replaced on each transition, and a hand-edited `schedule` is kept.
+  Other lists in merged YAML files, such as branches, are combined, so an entry CTM no longer produces stays until removed by hand.
+- Steps in workflows are matched by their `id`, `name`, `uses` or `run`, so if CTM changes a step's command, the old step stays next to the new one until removed by hand.
+- Config files with alternate names, such as `eslint.config.mjs` or `.github/renovate.json5`, are left alone, with a suggestion to move to CTM's file name.
+- pnpm 12.0.0 or newer is needed.
 
 ## Development
 

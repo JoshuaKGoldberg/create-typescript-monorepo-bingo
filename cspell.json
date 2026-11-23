@@ -10,6 +10,7 @@
     "pnpm-lock.yaml"
   ],
   "words": [
+    "APP",
     "autorelease",
     "dbaeumer",
     "marcalexiei",
@@ -17,7 +18,7 @@
     "octoguide",
     "quasis",
     "RELEASEBOT",
-    "unparseable",
-    "APP"
+    "renovaterc",
+    "unparseable"
   ]
 }

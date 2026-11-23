@@ -18,6 +18,8 @@ jobs:
       - uses: $/.github/actions/setup
       - name: Transition
         run: node packages/create-typescript-monorepo-bingo/src/bin/index.ts --mode transition --offline --skip-requests
+      - name: Update Lockfile
+        run: pnpm install --no-frozen-lockfile && pnpm format
       - name: Create Token
         id: create_token
         uses: actions/create-github-app-token@v3.3.0
@@ -25,6 +27,7 @@ jobs:
           client-id: ${{ vars.RELEASEBOT_APP_CLIENT_ID }}
           permission-contents: write
           permission-pull-requests: write
+          permission-workflows: write
           private-key: ${{ secrets.RELEASEBOT_APP_PRIVATE_KEY }}
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v8.1.3

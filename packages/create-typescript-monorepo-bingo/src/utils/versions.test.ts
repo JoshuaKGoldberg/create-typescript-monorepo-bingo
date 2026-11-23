@@ -82,9 +82,23 @@ describe(resolveSpecifier, () => {
   });
 
   it('uses ours when an alias points at a different package', () => {
-    expect(resolveSpecifier('npm:other@9.9.9', 'npm:typescript@7.0.2')).toBe(
+    expect(resolveSpecifier('npm:other@6.0.0', 'npm:typescript@7.0.2')).toBe(
       'npm:typescript@7.0.2',
     );
+  });
+
+  it('keeps a newer major version rather than switching to an older alias target', () => {
+    expect(resolveSpecifier('^7.0.2', 'npm:@typescript/typescript6@6.0.2', 'typescript')).toBe(
+      '^7.0.2',
+    );
+  });
+
+  it('keeps a range that allows newer versions than ours', () => {
+    expect(resolveSpecifier('^5.0.0 || ^27.0.0', '26.6.6')).toBe('^5.0.0 || ^27.0.0');
+  });
+
+  it.each(['git@github.com:a/b.git', 'gitlab:a/b', 'ssh://git@host/a.git'])('keeps %s', (spec) => {
+    expect(resolveSpecifier(spec, '1.0.0')).toBe(spec);
   });
 
   it('keeps a larger plain version', () => {

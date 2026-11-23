@@ -156,7 +156,11 @@ Each package lives under \`packages/\`, and shared build configuration lives in 
 
 ## Building
 
-Run [tsdown](https://tsdown.dev) in workspace mode to build every package's \`src/\` into \`dist/\`:
+${
+  usesTaskRunner(options)
+    ? `Run each package's [tsdown](https://tsdown.dev) build, in dependency order, through ${options.taskRunner === 'turbo' ? 'Turborepo' : options.taskRunner === 'nx' ? 'Nx' : 'pnpm'}, to build every package's \`src/\` into \`dist/\`:`
+    : "Run [tsdown](https://tsdown.dev) in workspace mode to build every package's `src/` into `dist/`:"
+}
 
 \`\`\`shell
 pnpm build
@@ -224,9 +228,11 @@ pnpm changeset
 The release workflow then opens a "Version Packages" PR, and publishes once it's merged.
 It needs, once per repository:
 
-- A GitHub App with contents and pull requests write access, installed on the repository, with its client ID in the \`${options.releaseApp ?? defaults.releaseApp}_CLIENT_ID\` Actions variable and a private key in the \`${options.releaseApp ?? defaults.releaseApp}_PRIVATE_KEY\` Actions secret
+- A GitHub App with contents, pull requests and workflows write access, installed on the repository, with its client ID in the \`${options.releaseApp ?? defaults.releaseApp}_CLIENT_ID\` Actions variable and a private key in the \`${options.releaseApp ?? defaults.releaseApp}_PRIVATE_KEY\` Actions secret
 - An [npm trusted publisher](https://docs.npmjs.com/trusted-publishers) for each package, pointing at the release workflow (a package's very first version may need to be published manually)
 - [Codecov](https://codecov.io) enabled for the repository, for coverage uploads
+
+The same GitHub App is used by the weekly transitions workflow, which re-runs [create-typescript-monorepo-bingo](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo) and opens a PR with any changes.
 `,
     '.github/ISSUE_TEMPLATE/01-bug.{yaml}': createIssueTemplate(
       '🐛 Report a Bug',

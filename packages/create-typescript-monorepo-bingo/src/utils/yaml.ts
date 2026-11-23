@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 
+import semver from 'semver';
 import {
   type Document,
   isMap,
@@ -86,8 +87,29 @@ function omitKeys(value: Record<string, unknown>, keys: string[]) {
   return Object.fromEntries(Object.entries(value).filter(([key]) => !omitted.has(key)));
 }
 
-function mergeNode(document: Document, node: unknown, value: unknown): unknown {
+function mergeNode(document: Document, node: unknown, value: unknown, key?: string): unknown {
+  // An empty value, like a \`pull_request: ~\` trigger, never replaces the repository's settings.
+  if (
+    value === null &&
+    node !== undefined &&
+    node !== null &&
+    !(isScalar(node) && node.value === null)
+  ) {
+    return node;
+  }
+
+  // A hand-written schedule is the repository's choice.
+  if (key === 'schedule' && isSeq(node)) {
+    return node;
+  }
+
   if (isPlainObject(value)) {
+    // Triggers written as a list, like \`on: [pull_request, push]\`, become a map.
+    if (isSeq(node) && node.items.every((item) => isScalar(item))) {
+      const names = node.items.map((item) => String((item as { value: unknown }).value));
+      node = document.createNode(Object.fromEntries(names.map((name) => [name, null])));
+    }
+
     if (!isMap(node)) {
       return document.createNode(value);
     }
@@ -101,7 +123,7 @@ function mergeNode(document: Document, node: unknown, value: unknown): unknown {
     for (const [key, child] of Object.entries(value)) {
       const pair = node.items.find((item) => keyText(item.key) === key);
       if (pair) {
-        pair.value = mergeNode(document, pair.value, child);
+        pair.value = mergeNode(document, pair.value, child, key);
         continue;
       }
 
@@ -135,13 +157,23 @@ function mergeNode(document: Document, node: unknown, value: unknown): unknown {
       return document.createNode(value);
     }
 
+    // Matrices follow CTM's settings, such as the Node.js versions from engines.node.
+    if (key === 'node-version' || key === 'os') {
+      node.items = value.map((item, index) =>
+        index < node.items.length
+          ? mergeNode(document, node.items[index], item)
+          : document.createNode(item),
+      );
+      return node;
+    }
+
     node.items = mergeSequence(document, node.items, value);
 
     return node;
   }
 
   if (isScalar(node) && (value === null || typeof value !== 'object')) {
-    if (node.value !== value) {
+    if (node.value !== value && !(key === 'uses' && keepsExistingAction(node.value, value))) {
       node.value = value;
     }
 
@@ -198,6 +230,29 @@ function isSameItem(node: unknown, item: unknown) {
 
   // Other maps, like schedule entries, match when they're equal.
   return isDeepStrictEqual(node.toJSON(), item);
+}
+
+/**
+ * Whether an existing \`uses:\` reference should be kept over CTM's: it's pinned to a commit
+ * SHA (as Renovate's best practices do), or to a version at least as new as CTM's.
+ */
+function keepsExistingAction(existing: unknown, ours: unknown) {
+  if (typeof existing !== 'string' || typeof ours !== 'string') {
+    return false;
+  }
+
+  if (withoutVersion(existing) !== withoutVersion(ours)) {
+    return false;
+  }
+
+  const existingRef = existing.slice(existing.lastIndexOf('@') + 1);
+  if (/^[0-9a-f]{40}$/.test(existingRef)) {
+    return true;
+  }
+
+  const existingVersion = semver.coerce(existingRef);
+  const ourVersion = semver.coerce(ours.slice(ours.lastIndexOf('@') + 1));
+  return !!existingVersion && !!ourVersion && semver.gte(existingVersion, ourVersion);
 }
 
 function withoutVersion(uses: string) {

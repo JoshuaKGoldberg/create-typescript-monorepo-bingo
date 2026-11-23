@@ -33,6 +33,18 @@ export const taskRunners = ['none', 'pnpm', 'turbo', 'nx'] as const;
 export type TaskRunner = (typeof taskRunners)[number];
 
 /**
+ * Creates a schema for one of several strings. bingo's CLI parses \`--flag value\` for
+ * unions of literals, but not for \`z.enum\`, which it only reads as \`--flag=value\`.
+ */
+function literalUnion<const Values extends readonly [string, string, ...string[]]>(values: Values) {
+  const [first, second, ...rest] = values.map((value) => z.literal(value));
+  return z.union([first, second, ...rest] as unknown as [
+    z.ZodLiteral<Values[number]>,
+    z.ZodLiteral<Values[number]>,
+  ]);
+}
+
+/**
  * Options for the repository as a whole.
  * None use `.default(...)`, because bingo prompts for defaulted schemas;
  * `prepare()` infers values and blocks fall back to the documented defaults.
@@ -43,8 +55,7 @@ export const rootOptionsShape = {
     .array(z.string())
     .optional()
     .describe('dependencies (as `<catalog>:<name>`) to leave out of catalogs'),
-  catalogs: z
-    .enum(catalogModes)
+  catalogs: literalUnion(catalogModes)
     .optional()
     .describe("pnpm catalogs to manage: 'none', 'default' (shared deps), or 'named' (by field)"),
   catalogShared: z
@@ -73,8 +84,7 @@ export const rootOptionsShape = {
     .describe('prefix of the GitHub App variable and secret used for releases'),
   repository: z.string().describe("'kebab-case' name of the repository"),
   scope: z.string().optional().describe("npm scope for the private build package, like '@my'"),
-  taskRunner: z
-    .enum(taskRunners)
+  taskRunner: literalUnion(taskRunners)
     .optional()
     .describe("task runner to orchestrate scripts: 'none', 'pnpm', 'turbo', or 'nx'"),
   title: z.string().describe("'Title Case' title for the repository"),
@@ -82,8 +92,7 @@ export const rootOptionsShape = {
     .string()
     .optional()
     .describe('dependency name that aliases TypeScript 7 for the tsc binary'),
-  workflowExtension: z
-    .enum(['yaml', 'yml'])
+  workflowExtension: literalUnion(['yaml', 'yml'] as const)
     .optional()
     .describe('file extension for GitHub Actions workflow files'),
 };

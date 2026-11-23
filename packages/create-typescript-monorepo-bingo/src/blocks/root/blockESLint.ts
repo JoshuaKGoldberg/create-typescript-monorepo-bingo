@@ -2,15 +2,11 @@ import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
-import { readText } from '../../utils/files.ts';
+import { findAlternateConfig, readText, withoutAlternate } from '../../utils/files.ts';
 import { mergeList } from '../../utils/lists.ts';
 import { getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
-import {
-  readESLintExtras,
-  readESLintIgnoresWithSource,
-  readESLintSignatures,
-} from '../../utils/staticConfig.ts';
+import { readESLintExtras, readESLintIgnoresWithSource } from '../../utils/staticConfig.ts';
 import { blockGitHubActionsCI, type WorkflowStep } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 import { blockVSCode } from './blockVSCode.ts';
@@ -28,20 +24,31 @@ export const blockESLint = rootBase.createBlock({
     name: 'ESLint',
   },
   intake({ files, options }) {
-    const existing = readText(files, 'eslint.config.ts');
-    const existingIgnores = readESLintIgnoresWithSource(existing);
-    const extras = readESLintExtras(
-      existing,
-      readESLintSignatures(createESLintConfig([], options.workflowExtension ?? 'yaml')),
-      ownModules,
-    );
-    return {
-      ...(existingIgnores && { existingIgnores }),
-      ...(extras && { extras }),
-    };
+    const alternate = findAlternateConfig(files, 'eslint');
+    const fromFiles = ((): object | undefined => {
+      const existing = readText(files, 'eslint.config.ts');
+      const existingIgnores = readESLintIgnoresWithSource(existing);
+      const extras = readESLintExtras(
+        existing,
+        createESLintConfig([], options.workflowExtension ?? defaults.workflowExtension),
+      );
+      return {
+        ...(existingIgnores && { existingIgnores }),
+        ...(extras && { extras }),
+      };
+    })();
+    return alternate ? { ...fromFiles, alternate } : fromFiles;
   },
   props: {
-    extras: z.object({ configs: z.array(z.string()), imports: z.array(z.string()) }).optional(),
+    alternate: z.string().optional(),
+    extras: z
+      .object({
+        configs: z.array(z.string()),
+        header: z.array(z.string()),
+        imports: z.array(z.string()),
+        statements: z.array(z.string()),
+      })
+      .optional(),
     existingIgnores: z
       .object({ lines: z.array(z.string()), values: z.array(z.string()) })
       .optional(),
@@ -68,7 +75,7 @@ export const blockESLint = rootBase.createBlock({
     const workflowExtension = options.workflowExtension ?? defaults.workflowExtension;
     const prebuildSteps: WorkflowStep[] = (props.lintPrebuildSteps ?? []).map((run) => ({ run }));
 
-    return {
+    return withoutAlternate(props.alternate, 'eslint.config.ts', {
       extensions: [
         blockGitHubActionsCI({
           jobs: [
@@ -116,24 +123,9 @@ export const blockESLint = rootBase.createBlock({
       files: {
         'eslint.config.ts': createESLintConfig(ignoreLines, workflowExtension, props.extras),
       },
-    };
+    });
   },
 });
-
-const ownModules = new Set([
-  '@eslint-community/eslint-plugin-eslint-comments/configs',
-  '@eslint/js',
-  '@eslint/markdown',
-  '@vitest/eslint-plugin',
-  'eslint-plugin-jsdoc',
-  'eslint-plugin-jsonc',
-  'eslint-plugin-package-json',
-  'eslint-plugin-perfectionist',
-  'eslint-plugin-regexp',
-  'eslint-plugin-yml',
-  'eslint/config',
-  'typescript-eslint',
-]);
 
 function withTrailingComma(line: string) {
   return line.startsWith('//') || line.startsWith('/*') || line.endsWith(',') ? line : `${line},`;
@@ -146,9 +138,9 @@ function withTrailingComma(line: string) {
 function createESLintConfig(
   ignoreLines: string[],
   workflowExtension: string,
-  extras?: { configs: string[]; imports: string[] },
+  extras?: { configs: string[]; header: string[]; imports: string[]; statements: string[] },
 ) {
-  return `import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
+  return `${extras?.header.length ? `${extras.header.join('\n')}\n\n` : ''}import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 import js from '@eslint/js';
 import markdown from '@eslint/markdown';
 import vitest from '@vitest/eslint-plugin';
@@ -160,7 +152,7 @@ import * as regexp from 'eslint-plugin-regexp';
 import yml from 'eslint-plugin-yml';
 import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
-${extras?.imports.length ? `${extras.imports.join('\n')}\n` : ''}
+${extras?.imports.length ? `${extras.imports.join('\n')}\n` : ''}${extras?.statements.length ? `\n${extras.statements.join('\n\n')}\n` : ''}
 export default defineConfig(
   {
     ignores: [

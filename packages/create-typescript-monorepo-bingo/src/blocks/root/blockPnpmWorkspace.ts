@@ -55,12 +55,18 @@ export const blockPnpmWorkspace = rootBase.createBlock({
       setDeep(document, [key], value);
     }
 
+    // The default catalog is written wherever it already is: catalog, or catalogs.default.
+    const defaultPath =
+      document.has('catalog') || !document.hasIn(['catalogs', 'default'])
+        ? ['catalog']
+        : ['catalogs', 'default'];
+
     for (const { catalog, dependency, specifier } of resolveCatalogEntries(
       readCatalogEntries(document),
       props.catalogEntries ?? [],
     )) {
       document.setIn(
-        catalog === 'default' ? ['catalog', dependency] : ['catalogs', catalog, dependency],
+        catalog === 'default' ? [...defaultPath, dependency] : ['catalogs', catalog, dependency],
         specifier,
       );
     }

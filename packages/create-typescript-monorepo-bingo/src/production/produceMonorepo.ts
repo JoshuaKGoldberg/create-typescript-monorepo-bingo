@@ -1,9 +1,15 @@
 import { type Creation, mergeCreations, type ProductionMode } from 'bingo';
 import type { CreatedDirectory, IntakeDirectory } from 'bingo-fs';
 import { type BlockCreation, producePreset } from 'bingo-stratum';
+import { z } from 'zod';
 
 import { rootBase } from '../bases/rootBase.ts';
-import type { PackageOptions, PackageSpec, RootOptions } from '../options.ts';
+import {
+  type PackageOptions,
+  type PackageSpec,
+  type RootOptions,
+  rootOptionsShape,
+} from '../options.ts';
 import {
   findSharedDependencies,
   findWorkspacePackages,
@@ -113,6 +119,16 @@ function produceMonorepoOnce({
  * of a new repository (named after it), and any `--new-package` to add.
  */
 export function normalizeOptions(options: RootOptions): RootOptions {
+  // bingo's CLI passes some invalid values through, such as unknown enum strings.
+  const validated = z.looseObject(rootOptionsShape).safeParse(options);
+  if (!validated.success) {
+    throw new Error(
+      `Invalid options: ${validated.error.issues
+        .map((issue) => `--${issue.path.join('.')}: ${issue.message}`)
+        .join('; ')}`,
+    );
+  }
+
   const packages: PackageSpec[] = [...(options.packages ?? [])];
 
   // prepare() always infers packages from an existing repository, so only a new one,

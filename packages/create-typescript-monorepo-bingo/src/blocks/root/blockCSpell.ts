@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
-import { parseJsonText, readText } from '../../utils/files.ts';
+import {
+  findAlternateConfig,
+  parseJsonText,
+  readText,
+  withoutAlternate,
+} from '../../utils/files.ts';
 import { formatJson } from '../../utils/json.ts';
 import { compareCaseInsensitive, mergeList } from '../../utils/lists.ts';
 import { getPackageGlobs } from '../../utils/options.ts';
@@ -27,10 +32,15 @@ export const blockCSpell = rootBase.createBlock({
     name: 'CSpell',
   },
   intake({ files }) {
-    const existing = readText(files, 'cspell.json');
-    return existing === undefined ? undefined : { existing };
+    const alternate = findAlternateConfig(files, 'cspell');
+    const fromFiles = ((): object | undefined => {
+      const existing = readText(files, 'cspell.json');
+      return existing === undefined ? undefined : { existing };
+    })();
+    return alternate ? { ...fromFiles, alternate } : fromFiles;
   },
   props: {
+    alternate: z.string().optional(),
     existing: z.string().optional(),
     ignorePaths: z.array(z.string()).optional(),
     words: z.array(z.string()).optional(),
@@ -39,7 +49,7 @@ export const blockCSpell = rootBase.createBlock({
     const existing = parseJsonText(props.existing);
     const list = (key: string) => existing[key] as string[] | undefined;
 
-    return {
+    return withoutAlternate(props.alternate, 'cspell.json', {
       extensions: [
         blockGitHubActionsCI({
           jobs: [
@@ -68,6 +78,6 @@ export const blockCSpell = rootBase.createBlock({
           props.existing,
         ),
       },
-    };
+    });
   },
 });
