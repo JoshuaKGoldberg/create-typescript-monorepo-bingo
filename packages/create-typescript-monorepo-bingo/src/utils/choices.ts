@@ -24,11 +24,29 @@ export const choicesKey = 'create-typescript-monorepo-bingo';
  */
 export function readChoices(files: IntakeDirectory): Choices {
   const manifest = parseJsonText(readText(files, 'package.json'), 'package.json');
-  const remembered = manifest[choicesKey] as Record<string, unknown> | null | undefined;
+  const value = manifest[choicesKey];
+  const remembered = isChoicesObject(value) ? value : {};
   return Object.fromEntries(
     Object.entries(choiceValues).flatMap(([name, values]) => {
-      const value = remembered?.[name];
-      return (values as readonly unknown[]).includes(value) ? [[name, value]] : [];
+      const choice = remembered[name];
+      return (values as readonly unknown[]).includes(choice) ? [[name, choice]] : [];
     }),
   );
+}
+
+/**
+ * Gets what else a repository holds in that property, which is kept.
+ */
+export function getOtherChoices(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      ([name, choice]) =>
+        !(name in choiceValues) ||
+        !(choiceValues[name as keyof typeof choiceValues] as readonly unknown[]).includes(choice),
+    ),
+  );
+}
+
+export function isChoicesObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }

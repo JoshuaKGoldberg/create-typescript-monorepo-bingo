@@ -1274,6 +1274,83 @@ describe('round 11 regressions', () => {
   });
 });
 
+describe('round 19 regressions', () => {
+  const editJson = (
+    files: IntakeDirectory,
+    path: string,
+    edit: (json: Record<string, unknown>) => void,
+  ) => {
+    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
+    edit(json);
+    setFile(files, path, JSON.stringify(json, null, 2));
+  };
+  const key = 'create-typescript-monorepo-bingo';
+  const createExisting = (manifest: object = {}): IntakeDirectory => ({
+    'package.json': [JSON.stringify({ name: 'root', private: true, type: 'module', ...manifest })],
+    'pnpm-workspace.yaml': ["packages:\n  - 'packages/*'\n"],
+    packages: {
+      a: {
+        'package.json': ['{ "name": "a", "devDependencies": { "tsdown": "^0.23.7" } }'],
+        'tsdown.config.ts': ["export default { entry: ['src/index.ts'] };\n"],
+      },
+    },
+  });
+
+  it('lints config files untyped, and expects no build, where TypeScript is kept', () => {
+    const files = createExisting({ devDependencies: { typescript: '^5.9.3' } });
+    applyFiles(files, transition(files).files);
+
+    expect(getFile(files, 'eslint.config.ts')).toContain(
+      "files: ['*.config.{js,ts}', 'packages/*/*.config.{js,ts}']",
+    );
+    expect(getFile(files, '.github/workflows/release.yaml')).not.toContain('pnpm build');
+    expect(getFile(files, '.github/DEVELOPMENT.md')).not.toContain('packages/build');
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+
+    applyFiles(files, transition(files, { newPackage: 'second' }).files);
+    expect(getFile(files, 'eslint.config.ts')).not.toContain('untyped-config-files');
+    expect(getFile(files, 'packages/build/package.json')).toBeDefined();
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it('finds ignoreDeprecations in a tsconfig others extend', () => {
+    const files = createExisting({ devDependencies: { typescript: '^6.0.2' } });
+    setFile(
+      files,
+      'config/tsconfig.base.json',
+      '{ "compilerOptions": { "ignoreDeprecations": "6.0" } }',
+    );
+
+    expect(getFile(transition(files).files, 'package.json')).not.toContain('typescript7');
+  });
+
+  it.each([
+    [{ scripts: { test: 'node --test' } }, { testRunner: 'vitest' }],
+    [{}, { testRunner: 'other' }],
+    [{ devDependencies: { prettier: '^3.0.0' } }, { formatter: 'prettier', testRunner: 'other' }],
+    [{}, { formatter: 'oxfmt' }],
+  ] as const)('keeps choices for %o with %o on later transitions', (manifest, options) => {
+    const files = createExisting(manifest);
+    applyFiles(files, transition(files, options).files);
+
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+    expect(applyFiles(files, transition(files).files)).toEqual([]);
+  });
+
+  it.each(['text', ['x'], null, true, {}, { linter: 'biome' }])(
+    'leaves a value of %o it does not recognize alone',
+    (value) => {
+      const files = createRepository();
+      editJson(files, 'package.json', (manifest) => {
+        manifest[key] = value;
+      });
+      const before = getFile(files, 'package.json');
+
+      expect(getFile(transition(files).files, 'package.json') ?? before).toBe(before);
+    },
+  );
+});
+
 describe('round 17 regressions', () => {
   const choicesText = '"create-typescript-monorepo-bingo": {';
   const editJson = (

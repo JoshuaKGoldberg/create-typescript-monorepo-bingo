@@ -116,7 +116,13 @@ export function prepareRoot(
     ...inferTitle(files),
     ...inferTypeScript7Alias(rootManifest, workspace),
     ...(!('typescript7Alias' in inferTypeScript7Alias(rootManifest, workspace)) &&
-      keepsTypeScript(files, rootManifest, workspacePackages) && { typescriptKept: true }),
+      keepsTypeScript(files, rootManifest) && {
+        typescriptKept: true,
+        // Nothing existing needs one, and an older tsc may reject its sources.
+        ...(readText(files, 'packages/build/package.json') === undefined && {
+          buildPackageSkipped: true,
+        }),
+      }),
     ...inferChoices(files, rootManifest, workspacePackages),
     // Choices made explicitly before, which the files alone may not show.
     ...readChoices(files),
@@ -166,10 +172,15 @@ export function findExplicitChoices(files: IntakeDirectory, options: RootOptions
       findWorkspacePackages(files, readWorkspaceYaml(files)?.packages ?? ['packages/*']),
     ),
   };
+  // A choice that's already remembered stays until another one is made, since what CTM
+  // writes can otherwise look like it was inferred.
+  const remembered = readChoices(files);
   return {
-    ...(formatter !== inferred.formatter && { formatter }),
+    ...((formatter !== inferred.formatter || formatter === remembered.formatter) && { formatter }),
     ...explicit,
-    ...(testRunner !== inferred.testRunner && { testRunner }),
+    ...((testRunner !== inferred.testRunner || testRunner === remembered.testRunner) && {
+      testRunner,
+    }),
   };
 }
 
@@ -178,11 +189,7 @@ export function findExplicitChoices(files: IntakeDirectory, options: RootOptions
  * older than 6, or tsconfigs use options TypeScript 7 removed, which TypeScript 6 only
  * accepts with ignoreDeprecations. One that already has the aliases already runs them.
  */
-function keepsTypeScript(
-  files: IntakeDirectory,
-  manifest: PackageManifest | undefined,
-  packages: WorkspacePackage[],
-) {
+function keepsTypeScript(files: IntakeDirectory, manifest: PackageManifest | undefined) {
   const typescript = manifest && getAllDependencies(manifest).typescript;
   const minimum = getMinimumVersion(
     'typescript',
@@ -192,25 +199,38 @@ function keepsTypeScript(
   return (
     !!minimum &&
     (minimum.major < 6 ||
-      [files, ...packages.map((pkg) => pkg.files)].some(ignoresDeprecations) ||
+      ignoresDeprecations(files) ||
       Object.values(manifest?.scripts ?? {}).some((script) =>
         script.includes('--ignoreDeprecations'),
       ))
   );
 }
 
-function ignoresDeprecations(directory: IntakeDirectory) {
-  return Object.keys(directory)
-    .filter((name) => /^tsconfig.*\.json$/.test(name))
-    .some((name) => {
-      try {
-        const { compilerOptions } = parseJsonText(readText(directory, name), name);
-        const value = (compilerOptions as Record<string, unknown> | undefined)?.ignoreDeprecations;
-        return typeof value === 'string' && value.startsWith('6');
-      } catch {
-        return false;
-      }
-    });
+/**
+ * Any tsconfig counts, since others may extend it, apart from test fixtures' own.
+ */
+function ignoresDeprecations(directory: IntakeDirectory): boolean {
+  return Object.entries(directory).some(([name, entry]) => {
+    if (!entry) {
+      return false;
+    }
+
+    if (!Array.isArray(entry)) {
+      return name !== 'node_modules' && !/fixture/i.test(name) && ignoresDeprecations(entry);
+    }
+
+    if (!/^(?:ts|js)config.*\.json$/.test(name)) {
+      return false;
+    }
+
+    try {
+      const { compilerOptions } = parseJsonText(entry[0], name);
+      const value = (compilerOptions as Record<string, unknown> | undefined)?.ignoreDeprecations;
+      return typeof value === 'string' && value.startsWith('6');
+    } catch {
+      return false;
+    }
+  });
 }
 
 interface WorkspaceYaml {

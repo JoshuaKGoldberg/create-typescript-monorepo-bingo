@@ -157,7 +157,9 @@ export const blockChangesets = rootBase.createBlock({
               ? [{ name: 'Prebuild', run: 'pnpm run -r prebuild' }]
               : []),
             // CTM's build package gives tsdown-built packages a root build script.
-            ...(props.rootBuild || options.packages?.some((pkg) => pkg.kind === 'library')
+            ...(props.rootBuild ||
+            (!options.buildPackageSkipped &&
+              options.packages?.some((pkg) => pkg.kind === 'library'))
               ? [{ name: 'Build', run: 'pnpm build' }]
               : []),
             {

@@ -133,6 +133,10 @@ export const rootOptionsShape = {
     .string()
     .optional()
     .describe('dependency name that aliases TypeScript 7 for the tsc binary'),
+  buildPackageSkipped: z
+    .boolean()
+    .optional()
+    .describe("inferred: TypeScript is kept, so there's no build package to add"),
   typescriptKept: z
     .boolean()
     .optional()

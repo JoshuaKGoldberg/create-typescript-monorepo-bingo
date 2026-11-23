@@ -181,12 +181,7 @@ export const blockBuildPackage = rootBase.createBlock({
     }
 
     const keptTypeScript = `CTM kept this repository's TypeScript ${props.rootTypeScript ?? ''}, because it's older than 6 or tsconfigs use ignoreDeprecations for options TypeScript 7 removed. Update those and re-run to set up its build package and type checking.`;
-    // Nothing existing needs a build package, whose sources an older tsc may reject.
-    if (
-      options.typescriptKept &&
-      props.existing?.packageJson === undefined &&
-      !options.newPackage
-    ) {
+    if (options.buildPackageSkipped) {
       return { suggestions: [keptTypeScript] };
     }
 

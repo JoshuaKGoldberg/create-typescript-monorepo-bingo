@@ -176,9 +176,12 @@ pnpm install
 \`\`\`
 
 This repository is a pnpm workspace monorepo.
-Each package lives under \`packages/\`, and shared build configuration lives in \`packages/build\`.
+Each package lives under \`packages/\`${options.buildPackageSkipped ? '' : ', and shared build configuration lives in `packages/build`'}.
 
-## Building
+${
+  options.buildPackageSkipped
+    ? ''
+    : `## Building
 
 ${
   usesTaskRunner(options)
@@ -190,10 +193,11 @@ ${
 pnpm build
 \`\`\`
 
-${
-  options.formatter === 'none'
-    ? ''
-    : `## Formatting
+`
+}${
+      options.formatter === 'none'
+        ? ''
+        : `## Formatting
 
 ${
   options.formatter === 'prettier'
@@ -211,7 +215,7 @@ ${options.formatter === 'biome' ? 'pnpm exec biome check --write .' : 'pnpm form
 \`\`\`
 
 `
-}## Linting
+    }## Linting
 
 ${
   options.linter === 'none'

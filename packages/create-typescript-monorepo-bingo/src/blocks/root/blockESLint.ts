@@ -75,6 +75,7 @@ export const blockESLint = rootBase.createBlock({
         vitest,
         options.formatter !== 'biome',
         packageJsonRulesOff,
+        getUntypedFiles(options),
       ),
       // Without Vitest, CTM's own Vitest entry and import are dropped, but only as CTM wrote
       // them: a repository's own entry for test files, like one for Jest, stays.
@@ -255,6 +256,7 @@ export const blockESLint = rootBase.createBlock({
             // Biome sorts imports and exports itself, in its own order.
             options.formatter !== 'biome',
             props.packageJsonRulesOff,
+            getUntypedFiles(options),
           ),
         }),
       },
@@ -332,6 +334,7 @@ function createESLintConfig(
   vitest = true,
   sorting = true,
   packageJsonRulesOff: string[] = [],
+  untypedFiles: string[] = [],
 ) {
   const replaced = new Set(extras?.replacedImports);
   if (!vitest) {
@@ -409,8 +412,18 @@ ${
     files: ['**/package.json'],
   },
 ${
-  packageJsonRulesOff.length
+  untypedFiles.length
     ? `  {
+    // Config files no tsconfig includes, with the repository's TypeScript kept as it is
+    extends: [tseslint.configs.disableTypeChecked],
+    files: [${untypedFiles.map((file) => `'${file}'`).join(', ')}],
+    name: '${ownEntryPrefix}untyped-config-files',
+  },
+`
+    : ''
+}${
+    packageJsonRulesOff.length
+      ? `  {
     // Fields existing packages don't have, which CTM doesn't fill in for them
     files: ['**/package.json'],
     name: '${ownEntryPrefix}missing-package-fields',
@@ -419,8 +432,8 @@ ${packageJsonRulesOff.map((rule) => `      'package-json/${rule}': 'off',`).join
     },
   },
 `
-    : ''
-}  {
+      : ''
+  }  {
     extends: [markdown.configs.recommended],
     files: ['**/*.md'],
     ignores: ['CHANGELOG.md'],
@@ -497,6 +510,15 @@ const requiredFields: [
   ['require-type', (manifest) => !!manifest.type, true],
   ['require-version', (manifest) => !!manifest.version, false],
 ];
+
+/**
+ * Gets config files CTM doesn't add to any tsconfig, where it leaves the root's alone.
+ */
+function getUntypedFiles(options: RootOptions): string[] {
+  return options.buildPackageSkipped
+    ? ['*.config.{js,ts}', ...getPackageGlobs(options, '*.config.{js,ts}')]
+    : [];
+}
 
 /**
  * Whether CTM's Vitest lint rules stay where CTM otherwise leaves tests alone: packages

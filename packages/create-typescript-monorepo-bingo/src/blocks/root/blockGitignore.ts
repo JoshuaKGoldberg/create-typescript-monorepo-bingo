@@ -93,7 +93,7 @@ export const blockGitignore = rootBase.createBlock({
     const hidden: string[] = [];
     // Without libraries, there's no build package unless it already exists.
     const hasBuild =
-      (!options.typescriptKept || !!options.newPackage) &&
+      !options.buildPackageSkipped &&
       (options.packages ?? []).some((pkg) => pkg.kind === 'library');
     for (const pkg of options.packages ?? []) {
       const isHidden = () =>

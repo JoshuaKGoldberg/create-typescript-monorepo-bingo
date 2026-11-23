@@ -6,7 +6,7 @@ import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
 import { findExplicitChoices } from '../../prepare/prepareRoot.ts';
 import { type Dependencies, resolveDependencies } from '../../utils/catalogs.ts';
-import { choicesKey } from '../../utils/choices.ts';
+import { choicesKey, getOtherChoices, isChoicesObject } from '../../utils/choices.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatPackageJson, mergeScripts, sortKeys } from '../../utils/json.ts';
 import { getAuthor, getRepositoryUrl } from '../../utils/options.ts';
@@ -59,13 +59,11 @@ export const blockRootPackageJson = rootBase.createBlock({
     );
     const dependencies = alignCompanions(existingDevDependencies, resolved, props.workspace);
 
-    // Other values a repository may hold there are kept.
-    const otherChoices = Object.fromEntries(
-      Object.entries(existing[choicesKey] ?? {}).filter(
-        ([name]) => !['formatter', 'linter', 'testRunner'].includes(name),
-      ),
-    ) as Record<string, unknown>;
-    const choices = { ...otherChoices, ...(props.choices ?? findExplicitChoices({}, options)) };
+    const ours = props.choices ?? findExplicitChoices({}, options);
+    const existingChoices = existing[choicesKey];
+    const ownsChoices = existingChoices === undefined || isChoicesObject(existingChoices);
+    const choices = { ...(ownsChoices && getOtherChoices(existingChoices ?? {})), ...ours };
+    const hadChoices = isChoicesObject(existingChoices) && !Object.keys(existingChoices).length;
 
     const packageJson = {
       ...(props.existing === undefined
@@ -80,7 +78,10 @@ export const blockRootPackageJson = rootBase.createBlock({
           }
         : existing),
       private: true,
-      [choicesKey]: Object.keys(choices).length ? choices : undefined,
+      // A value that isn't an object isn't CTM's.
+      ...(ownsChoices && {
+        [choicesKey]: Object.keys(choices).length || hadChoices ? choices : undefined,
+      }),
       // The weekly transitions workflow infers the owner and repository from here.
       ...(props.existing !== undefined &&
         !existing.repository && {
@@ -108,6 +109,12 @@ export const blockRootPackageJson = rootBase.createBlock({
     };
 
     return {
+      suggestions:
+        !ownsChoices && Object.keys(ours).length
+          ? [
+              `The root package.json's ${choicesKey} isn't an object, so your choices weren't kept there. Set it to ${JSON.stringify(ours)} for later transitions to use them.`,
+            ]
+          : [],
       extensions: catalogEntries.length ? [blockPnpmWorkspace({ catalogEntries })] : [],
       files: {
         'package.json': formatPackageJson(packageJson, props.existing),

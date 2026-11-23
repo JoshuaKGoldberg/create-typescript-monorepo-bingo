@@ -41,7 +41,7 @@ export const blockRootTSConfig = rootBase.createBlock({
   },
   produce({ options, props }) {
     // A TypeScript that's kept type checks as it did, without CTM's own files.
-    if (options.typescriptKept && !props.hasBuildPackage && !options.newPackage) {
+    if (options.buildPackageSkipped) {
       return {};
     }
 

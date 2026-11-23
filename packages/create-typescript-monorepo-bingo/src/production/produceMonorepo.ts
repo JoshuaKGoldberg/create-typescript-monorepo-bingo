@@ -212,6 +212,8 @@ export function normalizeOptions(options: RootOptions): RootOptions {
 
   return {
     ...options,
+    // A new package needs it.
+    ...(options.newPackage && { buildPackageSkipped: false }),
     packages,
   };
 }
