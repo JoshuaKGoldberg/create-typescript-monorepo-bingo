@@ -13,7 +13,7 @@
         "/packages/create-typescript-monorepo-bingo/src/utils/actions\\.ts$/"
       ],
       "matchStrings": [
-        "'[^']+': '(?<currentValue>[^']+)', // renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)"
+        "'[^']+': \\['(?<currentValue>[^']+)', '(?<currentDigest>[0-9a-f]{40})'\\], // renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)"
       ]
     }
   ]

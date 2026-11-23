@@ -1,4 +1,5 @@
 import semver from 'semver';
+import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
@@ -21,11 +22,16 @@ export const blockRootPackageJson = rootBase.createBlock({
   },
   intake({ files }) {
     const existing = readText(files, 'package.json');
-    return existing === undefined ? undefined : { existing };
+    const workspace = readText(files, 'pnpm-workspace.yaml');
+    return {
+      ...(existing !== undefined && { existing }),
+      ...(workspace !== undefined && { workspace }),
+    };
   },
   props: {
     devDependencies: dependenciesSchema.optional(),
     existing: z.string().optional(),
+    workspace: z.string().optional(),
     properties: z.record(z.string(), z.unknown()).optional(),
     removedDevDependencies: z.array(z.string()).optional(),
     scripts: z.record(z.string(), z.string()).optional(),
@@ -45,7 +51,7 @@ export const blockRootPackageJson = rootBase.createBlock({
       existingDevDependencies,
       props.devDependencies,
     );
-    const dependencies = alignCompanions(existingDevDependencies, resolved);
+    const dependencies = alignCompanions(existingDevDependencies, resolved, props.workspace);
 
     const packageJson = {
       ...(props.existing === undefined
@@ -60,6 +66,11 @@ export const blockRootPackageJson = rootBase.createBlock({
           }
         : existing),
       private: true,
+      // The weekly transitions workflow infers the owner and repository from here.
+      ...(props.existing !== undefined &&
+        !existing.repository && {
+          repository: { type: 'git', url: getRepositoryUrl(options) },
+        }),
       // Tool settings, like lint-staged and simple-git-hooks, only fill in what's missing.
       ...deepWithDefaults(existing, props.properties ?? {}),
       // Existing scripts keep their order; a new file's are sorted.
@@ -92,7 +103,7 @@ export const blockRootPackageJson = rootBase.createBlock({
   transition() {
     // Dependencies CTM adds can leave duplicates that pnpm dedupe --check would fail on.
     return {
-      scripts: [{ commands: ['pnpm install', 'pnpm dedupe'], phase: 0 }],
+      scripts: [{ commands: ['pnpm install --no-frozen-lockfile', 'pnpm dedupe'], phase: 0 }],
     };
   },
 });
@@ -165,10 +176,15 @@ const companions: Record<string, string> = {
  * When CTM adds a companion package, like `@vitest/coverage-v8`, next to a core package the
  * repository already has, like vitest, it gets the core package's version rather than CTM's.
  */
-function alignCompanions(existing: Dependencies, resolved: Dependencies): Dependencies {
+function alignCompanions(
+  existing: Dependencies,
+  resolved: Dependencies,
+  workspaceText: string | undefined,
+): Dependencies {
   const aligned = { ...resolved };
   for (const [companion, core] of Object.entries(companions)) {
-    const coreSpecifier = existing[core];
+    // A core package in a catalog has its version there.
+    const coreSpecifier = resolveCatalogReference(existing[core], core, workspaceText);
     if (
       companion in aligned &&
       !(companion in existing) &&
@@ -179,4 +195,23 @@ function alignCompanions(existing: Dependencies, resolved: Dependencies): Depend
     }
   }
   return aligned;
+}
+
+function resolveCatalogReference(
+  specifier: string | undefined,
+  dependency: string,
+  workspaceText: string | undefined,
+): string | undefined {
+  if (!specifier?.startsWith('catalog:')) {
+    return specifier;
+  }
+
+  const workspace = (parseYaml(workspaceText ?? '') ?? {}) as {
+    catalog?: Record<string, string>;
+    catalogs?: Partial<Record<string, Record<string, string>>>;
+  };
+  const name = specifier.slice('catalog:'.length) || 'default';
+  return name === 'default'
+    ? (workspace.catalog?.[dependency] ?? workspace.catalogs?.default?.[dependency])
+    : workspace.catalogs?.[name]?.[dependency];
 }

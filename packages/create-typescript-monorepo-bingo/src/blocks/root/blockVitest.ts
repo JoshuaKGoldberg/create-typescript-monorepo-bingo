@@ -152,6 +152,7 @@ ${indent}}))`;
     )`;
 
   return `${ownedFileMarker}
+
 import { readdirSync } from 'node:fs';
 import path from 'node:path';
 

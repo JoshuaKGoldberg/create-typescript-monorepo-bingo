@@ -127,6 +127,17 @@ function produceMonorepoOnce({
   return {
     ...creation,
     scripts: [...creation.scripts, ...createFormatScripts(options, creation, files)],
+    suggestions: [
+      ...creation.suggestions,
+      ...(readText(files, '.github/workflows/actions.lock') !== undefined &&
+      listFiles(creation.files).some(
+        (file) =>
+          file.startsWith('.github/') &&
+          readText(files, file) !== readCreated(creation.files, file),
+      )
+        ? ['Workflows changed, so run `gh actions-lock` to update .github/workflows/actions.lock.']
+        : []),
+    ],
   };
 }
 
@@ -162,7 +173,10 @@ export function normalizeOptions(options: RootOptions): RootOptions {
       options.newPackage,
       options.newPackageDescription ?? `The ${options.newPackage} package in ${options.title}.`,
     );
-    const collision = packages.find((pkg) => pkg.directory === created.directory);
+    const collision =
+      created.directory === 'packages/build'
+        ? { name: 'the build package' }
+        : packages.find((pkg) => pkg.directory === created.directory);
     if (collision) {
       throw new Error(
         `Can't add --newPackage ${options.newPackage}: ${created.directory} already holds ${collision.name}.`,

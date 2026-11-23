@@ -75,7 +75,9 @@ export const blockGitHubActionsSetup = rootBase.createBlock({
                       },
                     },
                     {
-                      run: 'pnpm install ${{ inputs.install-flags }}',
+                      // Through env, not interpolated into the script (zizmor's template-injection).
+                      env: { INSTALL_FLAGS: '${{ inputs.install-flags }}' },
+                      run: 'pnpm install $INSTALL_FLAGS',
                       if: "${{ inputs.install-flags != '' }}",
                       shell: 'bash',
                     },

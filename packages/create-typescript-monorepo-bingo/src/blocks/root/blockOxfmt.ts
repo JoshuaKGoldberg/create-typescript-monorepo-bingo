@@ -29,26 +29,43 @@ export const blockOxfmt = rootBase.createBlock({
   },
   intake({ files }) {
     const alternate = findAlternateConfig(files, 'oxfmt');
-    const fromFiles = ((): object | undefined => {
-      const existing = readText(files, 'oxfmt.config.ts');
-      return existing === undefined ? undefined : { existing };
-    })();
-    return alternate ? { ...fromFiles, alternate } : fromFiles;
+    const existing = readText(files, 'oxfmt.config.ts');
+    return {
+      ...(alternate && { alternate }),
+      ...(existing !== undefined && { existing }),
+      ...(readText(files, '.prettierignore') !== undefined && { hasPrettierIgnore: true }),
+    };
   },
   props: {
     alternate: z.string().optional(),
     existing: z.string().optional(),
+    hasPrettierIgnore: z.boolean().optional(),
     ignorePatterns: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
     if (options.formatter === 'prettier') {
       return {
         extensions: [
+          blockGitHubActionsCI({
+            jobs: [
+              {
+                id: 'format_check',
+                name: 'Format Check',
+                steps: [{ run: 'pnpm exec prettier --check .' }],
+              },
+            ],
+          }),
           blockRootPackageJson({
             devDependencies: pinned('prettier'),
             scripts: { format: 'prettier --write .' },
           }),
         ],
+        // Prettier would otherwise reformat files tools write, like the lockfile.
+        files: props.hasPrettierIgnore
+          ? {}
+          : {
+              '.prettierignore': `${[...baseIgnorePatterns, ...getPackageGlobs(options, 'dist'), ...getPackageGlobs(options, 'lib')].join('\n')}\n`,
+            },
       };
     }
 

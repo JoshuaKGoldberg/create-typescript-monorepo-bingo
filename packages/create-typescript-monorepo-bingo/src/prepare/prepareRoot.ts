@@ -547,13 +547,17 @@ function inferDescription(
     return { description: manifest.description };
   }
 
-  const readme = readText(files, 'README.md') ?? '';
+  // The README's centered tagline, or its first plain paragraph line, skipping code blocks,
+  // HTML comments, headings, lists, quotes, tables and badges.
+  const readme = (readText(files, 'README.md') ?? '')
+    .replaceAll(/```[\s\S]*?```/g, '')
+    .replaceAll(/<!--[\s\S]*?-->/g, '');
   const tagline =
     /<p align="center">([^<]+)<\/p>/.exec(readme)?.[1] ??
     readme
       .split('\n')
       .map((line) => line.trim())
-      .find((line) => line && !/^[#<!>[|`-]/.test(line));
+      .find((line) => line && !/^(?:[#<>[|`*+-]|\d+\.)/.test(line));
 
   return tagline ? { description: tagline.trim() } : {};
 }

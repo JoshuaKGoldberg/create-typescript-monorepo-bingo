@@ -146,6 +146,7 @@ export const blockGitHubActionsCI = rootBase.createBlock({
               props.existing,
               {
                 name: `.github/workflows/ci.${options.workflowExtension ?? 'yaml'}`,
+                nodeEngines: options.nodeEngines ?? defaults.nodeEngines,
                 scripts: props.rootScripts,
                 workflow: true,
               },

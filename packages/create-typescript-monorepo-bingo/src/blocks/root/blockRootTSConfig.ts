@@ -20,10 +20,16 @@ export const blockRootTSConfig = rootBase.createBlock({
   },
   intake({ files }) {
     const existing = readText(files, 'tsconfig.json');
-    return existing === undefined ? undefined : { existing };
+    return {
+      ...(existing !== undefined && { existing }),
+      ...(readText(files, 'packages/build/package.json') !== undefined && {
+        hasBuildPackage: true,
+      }),
+    };
   },
   props: {
     existing: z.string().optional(),
+    hasBuildPackage: z.boolean().optional(),
     include: z.array(z.string()).optional(),
     references: z.array(z.string()).optional(),
   },
@@ -40,6 +46,9 @@ export const blockRootTSConfig = rootBase.createBlock({
       }
     }
 
+    const hasBuildPackage =
+      !!props.hasBuildPackage || (options.packages ?? []).some((pkg) => pkg.kind === 'library');
+
     // A solution-style config, with no files of its own, only gets references.
     const isSolution = Array.isArray(existing.files) && !existing.files.length;
     const include = new Set([
@@ -54,17 +63,33 @@ export const blockRootTSConfig = rootBase.createBlock({
       files: {
         'tsconfig.json': formatJson(
           {
-            extends: `${getBuildPackageName(options)}/tsconfig.base.json`,
+            // Only a new file extends the build package's base, and only if there is one.
+            ...(props.existing === undefined &&
+              hasBuildPackage && { extends: `${getBuildPackageName(options)}/tsconfig.base.json` }),
             ...existing,
             // Existing compiler options are the repository's.
             ...(!isSolution && {
               compilerOptions: withDefaults(
                 existing.compilerOptions as Record<string, unknown> | undefined,
-                { noEmit: true, tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.json' },
+                {
+                  // Without a build package's base, a new file stands on its own.
+                  ...(props.existing === undefined &&
+                    !hasBuildPackage && {
+                      module: 'NodeNext',
+                      moduleResolution: 'NodeNext',
+                      skipLibCheck: true,
+                      strict: true,
+                      target: 'ES2022',
+                    }),
+                  noEmit: true,
+                  tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.json',
+                },
               ),
               include: [...include],
             }),
-            references: references.map((path) => ({ path })),
+            ...(references.length || existing.references !== undefined
+              ? { references: references.map((path) => ({ path })) }
+              : {}),
           },
           props.existing,
         ),

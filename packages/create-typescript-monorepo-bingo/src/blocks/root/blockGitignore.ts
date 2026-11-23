@@ -39,13 +39,16 @@ export const blockGitignore = rootBase.createBlock({
       const normalized = normalizeIgnore(ignore);
       if (
         present.has(normalized) ||
-        [...present].some((line) => line.startsWith(`${normalized}/`))
+        // .nx/* covers .nx/, and packages/*/lib covers lib/.
+        [...present].some(
+          (line) => line.startsWith(`${normalized}/`) || line.endsWith(`/${normalized}`),
+        )
       ) {
         continue;
       }
 
       // An ignore like lib/ would hide existing files, such as source code in a src/lib.
-      if (props.existing !== undefined && directories.has(normalized)) {
+      if (directories.has(normalized)) {
         skipped.push(ignore);
         continue;
       }
@@ -57,9 +60,11 @@ export const blockGitignore = rootBase.createBlock({
     // A fresh file is kept sorted; an existing one only gets appended to.
     const output = props.existing === undefined ? lines.sort() : lines;
 
+    const text = `${output.join('\n')}\n`;
     return {
       files: {
-        '.gitignore': `${output.join('\n')}\n`,
+        // Written back exactly as it was when nothing is added.
+        '.gitignore': text.trimEnd() === props.existing?.trimEnd() ? props.existing : text,
       },
       suggestions: skipped.map(
         (ignore) =>

@@ -1,12 +1,13 @@
-import { isDeepStrictEqual } from 'node:util';
-
+import semver from 'semver';
 import { type Document, isMap, isNode, isScalar, isSeq, parseDocument, stringify } from 'yaml';
+
+import { annotateActionVersions } from './actions.ts';
 
 /**
  * Stringifies a value as YAML in the style oxfmt and Prettier use.
  */
 export function formatYaml(value: unknown): string {
-  return stringify(value, { lineWidth: 0, singleQuote: true });
+  return annotateActionVersions(stringify(value, { lineWidth: 0, singleQuote: true }));
 }
 
 /**
@@ -51,9 +52,15 @@ export function formatYamlFile(
   existingText: string | undefined,
   {
     name,
+    nodeEngines,
     scripts = {},
     workflow = false,
-  }: { name?: string; scripts?: Record<string, string>; workflow?: boolean } = {},
+  }: {
+    name?: string;
+    nodeEngines?: string;
+    scripts?: Record<string, string>;
+    workflow?: boolean;
+  } = {},
 ): string {
   if (existingText === undefined) {
     return workflow ? formatWorkflow(value) : formatYaml(value);
@@ -84,7 +91,7 @@ export function formatYamlFile(
     );
 
     if (existing) {
-      changed = syncNodeVersions(document, existing.value, job) || changed;
+      changed = syncNodeVersions(document, existing.value, job, nodeEngines) || changed;
       continue;
     }
 
@@ -103,9 +110,11 @@ export function formatYamlFile(
   }
 
   return changed
-    ? document
-        .toString({ flowCollectionPadding: false, lineWidth: 0, singleQuote: true })
-        .replaceAll(/[ \t]+$/gm, '')
+    ? annotateActionVersions(
+        document
+          .toString({ flowCollectionPadding: false, lineWidth: 0, singleQuote: true })
+          .replaceAll(/[ \t]+$/gm, ''),
+      )
     : existingText;
 }
 
@@ -113,7 +122,12 @@ export function formatYamlFile(
  * Updates an existing job's `strategy.matrix.node-version` list to CTM's, which follows
  * `engines.node`. Other matrices, and versions written as expressions, are kept.
  */
-function syncNodeVersions(document: Document, node: unknown, job: unknown) {
+function syncNodeVersions(
+  document: Document,
+  node: unknown,
+  job: unknown,
+  nodeEngines: string | undefined,
+) {
   const ours = isPlainObject(job)
     ? getPath(job, ['strategy', 'matrix', 'node-version'])
     : undefined;
@@ -126,16 +140,20 @@ function syncNodeVersions(document: Document, node: unknown, job: unknown) {
     return false;
   }
 
-  const current = existing.items.map((item) => (isScalar(item) ? item.value : item));
-  if (isDeepStrictEqual(current, ours)) {
+  // Existing versions that engines.node still allows are kept; ones it doesn't are
+  // removed, and CTM's own are added.
+  const kept = existing.items.filter(
+    (item) =>
+      !isScalar(item) || nodeEngines === undefined || allowsNodeVersion(nodeEngines, item.value),
+  );
+  const values = new Set(kept.map((item) => (isScalar(item) ? String(item.value) : item)));
+  const added = ours.filter((version) => !values.has(String(version)));
+
+  if (kept.length === existing.items.length && !added.length) {
     return false;
   }
 
-  existing.items = ours.map(
-    (version) =>
-      existing.items.find((item) => isScalar(item) && item.value === version) ??
-      document.createNode(version),
-  );
+  existing.items = [...kept, ...added.map((version) => document.createNode(version))];
   return true;
 }
 
@@ -176,9 +194,21 @@ function hasEquivalentJob(workflow: unknown, job: unknown, scripts: Record<strin
 }
 
 function getSteps(job: unknown): { run?: string; uses?: string }[] {
-  return isPlainObject(job) && Array.isArray(job.steps)
-    ? job.steps.filter((step): step is { run?: string; uses?: string } => isPlainObject(step))
-    : [];
+  return isPlainObject(job) && Array.isArray(job.steps) ? flattenSteps(job.steps) : [];
+}
+
+/**
+ * Flattens steps, including ones nested in groups like `parallel:`.
+ */
+function flattenSteps(steps: unknown[]): { run?: string; uses?: string }[] {
+  return steps.flatMap((step) => {
+    if (!isPlainObject(step)) {
+      return [];
+    }
+
+    const nested = Object.values(step).filter((value) => Array.isArray(value));
+    return [step, ...nested.flatMap((value) => flattenSteps(value as unknown[]))];
+  });
 }
 
 function normalizeUses(uses: string) {
@@ -205,4 +235,25 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function keyText(key: unknown) {
   return isScalar(key) ? String(key.value) : String(key);
+}
+
+/**
+ * Whether engines.node allows a matrix entry: an exact version it satisfies, or a major
+ * (or major.minor) any of whose versions it allows.
+ */
+function allowsNodeVersion(nodeEngines: string, value: unknown) {
+  const version = String(value);
+  if (semver.valid(version)) {
+    return semver.satisfies(version, nodeEngines);
+  }
+
+  if (!/^\d+(?:\.\d+)?$/.test(version)) {
+    return true;
+  }
+
+  try {
+    return semver.intersects(`${version}.x`, nodeEngines);
+  } catch {
+    return true;
+  }
 }

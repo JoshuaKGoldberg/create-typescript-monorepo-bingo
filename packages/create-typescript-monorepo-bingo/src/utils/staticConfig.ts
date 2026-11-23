@@ -120,8 +120,11 @@ export function readESLintIgnoresWithSource(
 
   let found: ESLintIgnoresSource | undefined;
 
+  // Only the config's own entries count, not ignores-only objects elsewhere in the file.
+  const entries = new Set<unknown>(getConfigArgs(program.body as unknown as SpannedNode[]));
+
   visit(program, (node) => {
-    if (found || node.type !== 'ObjectExpression') {
+    if (found || node.type !== 'ObjectExpression' || !entries.has(node)) {
       return;
     }
 

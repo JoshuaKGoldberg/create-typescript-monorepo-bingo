@@ -269,11 +269,11 @@ export default config;
       '.github/workflows/release.yaml',
       release
         .replaceAll(
-          'actions/create-github-app-token@v3.3.0',
+          /actions\/create-github-app-token@\S+(?: # \S+)?/g,
           'actions/create-github-app-token@v4.0.0',
         )
         .replace(
-          'actions/checkout@v7.0.1',
+          /actions\/checkout@\S+(?: # \S+)?/,
           'actions/checkout@0123456789abcdef0123456789abcdef01234567 # v7.0.2',
         ),
     );
@@ -341,7 +341,7 @@ export default config;
 
     const output = getFile(transition(files).files, 'eslint.config.ts') ?? '';
 
-    expect(output.startsWith(`${ownedFileMarker}\n// @ts-check`)).toBe(true);
+    expect(output.startsWith(`${ownedFileMarker}\n\n// @ts-check`)).toBe(true);
     expect(output).toContain("const scriptGlobs = ['scripts/**/*.ts'];");
     expect(output).toContain("rules: { 'jsonc/sort-keys': 'error' }");
     expect(output).toContain("{ ignores: ['generated/**'] }");
@@ -540,5 +540,95 @@ export default config;
 
     expect(getFile(creation.files, 'eslint.config.ts')).toBeUndefined();
     expect(creation.suggestions).toContainEqual(expect.stringContaining('eslint.config.ts'));
+  });
+
+  it("doesn't extend a build package a repository without libraries doesn't get", () => {
+    const files = createRepository();
+    const packages = files.packages as IntakeDirectory;
+    delete packages.build;
+    delete (packages.example as IntakeDirectory)['tsdown.config.ts'];
+    delete (files as Record<string, unknown>)['tsconfig.json'];
+
+    const tsconfig = getFile(transition(files).files, 'tsconfig.json') ?? '';
+
+    expect(tsconfig).not.toContain('extends');
+    expect(tsconfig).toContain('"moduleResolution": "NodeNext"');
+  });
+
+  it('reads ESLint ignores only from the config, not other objects in the file', () => {
+    const files = createRepository();
+    const config = (getFile(files, 'eslint.config.ts') ?? '')
+      .replace("'**/*.snap',", "'**/*.snap',\n      'docs/generated',")
+      .replace(
+        "import tseslint from 'typescript-eslint';",
+        "import tseslint from 'typescript-eslint';\n\nconst fixtureIgnores = { ignores: ['**/fixtures/**'] };",
+      );
+    setFile(files, 'eslint.config.ts', config);
+
+    expect(getFile(transition(files).files, 'eslint.config.ts')).toContain("'docs/generated'");
+  });
+
+  it('finds the owned-file marker after imports are sorted above it', () => {
+    const files = createRepository();
+    const config = getFile(files, 'eslint.config.ts') ?? '';
+    setFile(
+      files,
+      'eslint.config.ts',
+      `import cspell from '@cspell/eslint-plugin/configs';\n${config}`,
+    );
+
+    expect(getFile(transition(files).files, 'eslint.config.ts')).toBeDefined();
+  });
+
+  it('gives a companion package the version of a cataloged core package', () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+    };
+    manifest.devDependencies.vitest = 'catalog:';
+    delete manifest.devDependencies['@vitest/coverage-v8'];
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+    setFile(
+      files,
+      'pnpm-workspace.yaml',
+      `${getFile(files, 'pnpm-workspace.yaml') ?? ''}catalog:\n  vitest: ^4.0.0\n`,
+    );
+
+    expect(getFile(transition(files).files, 'package.json')).toContain(
+      '"@vitest/coverage-v8": "^4.0.0"',
+    );
+  });
+
+  it('keeps matrix entries that engines.node still allows', () => {
+    const files = createRepository({ nodeEngines: '>=20' });
+    const ci = (getFile(files, '.github/workflows/ci.yaml') ?? '').replace(
+      /node-version:\n(?:\s+- \S+\n)+/,
+      'node-version:\n          - 20\n          - 22\n          - 24\n',
+    );
+    setFile(files, '.github/workflows/ci.yaml', ci);
+
+    const output = getFile(
+      transition(files, { nodeEngines: '>=20' }).files,
+      '.github/workflows/ci.yaml',
+    );
+
+    expect(output).toMatch(/- 22\n\s+- 24/);
+  });
+
+  it('adds a .prettierignore in Prettier repositories', () => {
+    const files = createRepository({ formatter: 'prettier' });
+
+    expect(getFile(files, '.prettierignore')).toContain('pnpm-lock.yaml');
+  });
+
+  it('adds a missing repository to the root package.json', () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as Record<string, unknown>;
+    delete manifest.repository;
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    expect(getFile(transition(files).files, 'package.json')).toContain(
+      'https://github.com/example-org/example',
+    );
   });
 });

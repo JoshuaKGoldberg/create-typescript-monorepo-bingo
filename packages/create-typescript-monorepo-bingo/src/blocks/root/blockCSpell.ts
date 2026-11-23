@@ -77,22 +77,25 @@ export const blockCSpell = rootBase.createBlock({
             }),
             blockVSCode({ extensions: ['streetsidesoftware.code-spell-checker'] }),
           ],
-      files: {
-        'cspell.json': formatJson(
-          {
-            ...existing,
-            dictionaries: mergeList(list('dictionaries'), ['node', 'npm', 'typescript']),
-            ignorePaths: mergeList(list('ignorePaths'), [
-              ...baseIgnorePaths,
-              ...getPackageGlobs(options, 'dist'),
-              ...getPackageGlobs(options, 'lib'),
-              ...(props.ignorePaths ?? []),
-            ]),
-            words: mergeList(list('words'), props.words ?? [], compareCaseInsensitive),
+      // A cspell.json that only editors use is left as it is.
+      files: props.editorOnly
+        ? {}
+        : {
+            'cspell.json': formatJson(
+              {
+                ...existing,
+                dictionaries: mergeList(list('dictionaries'), ['node', 'npm', 'typescript']),
+                ignorePaths: mergeList(list('ignorePaths'), [
+                  ...baseIgnorePaths,
+                  ...getPackageGlobs(options, 'dist'),
+                  ...getPackageGlobs(options, 'lib'),
+                  ...(props.ignorePaths ?? []),
+                ]),
+                words: mergeList(list('words'), props.words ?? [], compareCaseInsensitive),
+              },
+              props.existing,
+            ),
           },
-          props.existing,
-        ),
-      },
     });
   },
 });

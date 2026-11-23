@@ -217,6 +217,7 @@ function createESLintConfig(
 ) {
   const replaced = new Set(extras?.replacedImports);
   return `${ownedFileMarker}
+
 ${extras?.header.filter((comment) => comment !== ownedFileMarker).length ? `${extras.header.filter((comment) => comment !== ownedFileMarker).join('\n')}\n\n` : ''}${ownImports
     .filter(([module]) => !replaced.has(module))
     .map(([, line]) => `${line}\n`)

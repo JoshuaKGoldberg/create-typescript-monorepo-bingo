@@ -188,12 +188,13 @@ export const ownedFileMarker =
  * Whether CTM may write an owned file: it's new, or it carries the marker.
  */
 export function isOwnedFile(text: string | undefined): boolean {
-  return text === undefined || text.startsWith(ownedFileMarker);
+  // Anywhere as its own line: import sorting can move imports above it.
+  return text === undefined || text.split('\n').some((line) => line.trim() === ownedFileMarker);
 }
 
 /**
  * Creates the suggestion shown when CTM leaves an unmarked owned file alone.
  */
 export function describeUnownedFile(filePath: string): string {
-  return `${filePath} wasn't created by create-typescript-monorepo-bingo, so it wasn't replaced. Delete it, or add "${ownedFileMarker}" as its first line, to have it managed.`;
+  return `${filePath} wasn't created by create-typescript-monorepo-bingo, so it wasn't replaced. Delete it, or add "${ownedFileMarker}" as a line at its top, to have it managed.`;
 }

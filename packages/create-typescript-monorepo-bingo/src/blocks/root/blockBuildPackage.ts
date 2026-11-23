@@ -56,6 +56,7 @@ const tsconfigBase = {
 };
 
 const tsdownBase = `${ownedFileMarker}
+
 import type { UserConfig } from 'tsdown';
 
 export const base: UserConfig = {
@@ -133,14 +134,13 @@ export const blockBuildPackage = rootBase.createBlock({
     const existingTSConfig = parseJsonText(existingTexts.tsconfig);
     const existingTSConfigBase = parseJsonText(existingTexts.tsconfigBase);
     const name = getBuildPackageName(options);
+    const ownsBase = isOwnedFile(existingTexts.tsdownBase);
     const { catalogEntries, dependencies } = resolveDependencies(
       options,
       'dependencies',
       existing.dependencies as Dependencies | undefined,
-      {
-        tsdown: pin('tsdown'),
-        typescript: typescriptSpecifier(),
-      },
+      // A tsdown base the repository owns decides its own dependencies.
+      ownsBase ? { tsdown: pin('tsdown'), typescript: typescriptSpecifier() } : {},
       'devDependencies',
     );
 
@@ -194,10 +194,13 @@ export const blockBuildPackage = rootBase.createBlock({
         blockVSCode({ settings: { 'js/ts.tsdk.path': 'node_modules/@typescript/old/lib' } }),
         blockRootPackageJson({
           devDependencies: {
-            '@arethetypeswrong/core': pin('@arethetypeswrong/core'),
+            // CTM's tsdown base runs attw and publint.
+            ...(ownsBase && {
+              '@arethetypeswrong/core': pin('@arethetypeswrong/core'),
+              publint: pin('publint'),
+            }),
             '@types/node': pin('@types/node'),
             [name]: 'workspace:^',
-            publint: pin('publint'),
             tsdown: pin('tsdown'),
             typescript: typescriptSpecifier(),
             [typescript7Alias]: typescript7Specifier(),

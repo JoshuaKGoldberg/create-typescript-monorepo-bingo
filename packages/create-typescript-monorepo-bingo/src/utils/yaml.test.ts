@@ -92,7 +92,7 @@ jobs:
           },
         },
         existing,
-        { workflow: true },
+        { nodeEngines: '>=22', workflow: true },
       ),
     ).toBe(`jobs:
   test_node:

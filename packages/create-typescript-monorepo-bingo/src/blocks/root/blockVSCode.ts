@@ -42,7 +42,8 @@ export const blockVSCode = rootBase.createBlock({
       | undefined;
     const extensions = mergeList(existingExtensions, props.extensions ?? []);
     const existingSettings = parseJsonText(texts.settings);
-    const settings = sortKeys({
+    // A new file's settings are sorted; an existing one keeps its order.
+    const settings = (texts.settings === undefined ? sortKeys : <T>(value: T) => value)({
       'editor.formatOnSave': true,
       'editor.rulers': [100],
       ...props.settings,
@@ -95,7 +96,9 @@ function updateStockTsdk(existing: Record<string, unknown>, ours: unknown) {
 
   const stock = Object.keys(existing).filter(
     (key) =>
-      (key === 'js/ts.tsdk.path' || key === 'typescript.tsdk') && existing[key] === stockTsdk,
+      (key === 'js/ts.tsdk.path' || key === 'typescript.tsdk') &&
+      typeof existing[key] === 'string' &&
+      existing[key].replace(/^\.\//, '').replace(/\/$/, '') === stockTsdk,
   );
   return Object.fromEntries(stock.map((key) => [key, ours]));
 }
