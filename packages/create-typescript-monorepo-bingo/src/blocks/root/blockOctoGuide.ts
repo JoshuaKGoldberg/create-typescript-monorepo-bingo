@@ -23,7 +23,11 @@ export const blockOctoGuide = rootBase.createBlock({
   },
   produce({ options, props }) {
     return {
-      extensions: [blockCSpell({ words: ['autorelease', 'octoguide', 'zizmor'] })],
+      // The words CTM's workflow uses, when CTM writes it.
+      extensions:
+        props.existing === undefined
+          ? [blockCSpell({ words: ['autorelease', 'octoguide', 'zizmor'] })]
+          : [],
       files: {
         '.github': {
           workflows: {

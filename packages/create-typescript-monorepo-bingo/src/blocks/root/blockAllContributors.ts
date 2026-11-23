@@ -69,7 +69,11 @@ export const blockAllContributors = rootBase.createBlock({
                       'pull-requests': 'write',
                     },
                     steps: [
-                      { uses: action('actions/checkout'), with: { 'fetch-depth': 0 } },
+                      {
+                        uses: action('actions/checkout'),
+                        // The action commits through its token, so the checkout keeps no credentials.
+                        with: { 'fetch-depth': 0, 'persist-credentials': false },
+                      },
                       { uses: '$/.github/actions/setup', with: { 'skip-checkout': true } },
                       {
                         uses: action('JoshuaKGoldberg/all-contributors-auto-action'),

@@ -631,4 +631,34 @@ export default config;
       'https://github.com/example-org/example',
     );
   });
+
+  it('keeps existing VS Code settings in place and appends missing ones', () => {
+    const files = createRepository();
+    setFile(
+      files,
+      '.vscode/settings.json',
+      JSON.stringify({ 'z.custom': 1, 'editor.rulers': [80] }, null, 2),
+    );
+
+    const settings = JSON.parse(
+      getFile(transition(files).files, '.vscode/settings.json') ?? '{}',
+    ) as Record<string, unknown>;
+
+    expect(Object.keys(settings).slice(0, 2)).toEqual(['z.custom', 'editor.rulers']);
+    expect(settings['editor.rulers']).toEqual([80]);
+  });
+
+  it("doesn't add an engines check when a repository-owned package could fail it", () => {
+    const files = createRepository();
+    delete ((files['.github'] as IntakeDirectory).workflows as IntakeDirectory)['ci.yaml'];
+    setFile(
+      files,
+      'packages/website/package.json',
+      JSON.stringify({ name: 'website', private: true }),
+    );
+
+    expect(getFile(transition(files).files, '.github/workflows/ci.yaml')).not.toContain(
+      'engines_check',
+    );
+  });
 });

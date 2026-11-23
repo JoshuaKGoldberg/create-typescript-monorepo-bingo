@@ -153,7 +153,14 @@ function syncNodeVersions(
     return false;
   }
 
-  existing.items = [...kept, ...added.map((version) => document.createNode(version))];
+  // CTM's versions come in its order, then any others the repository keeps.
+  const keyOf = (item: unknown) => (isScalar(item) ? String(item.value) : item);
+  const byValue = new Map(kept.map((item) => [keyOf(item), item]));
+  const oursKeys = new Set(ours.map(String));
+  existing.items = [
+    ...ours.map((version) => byValue.get(String(version)) ?? document.createNode(version)),
+    ...kept.filter((item) => !oursKeys.has(keyOf(item) as string)),
+  ];
   return true;
 }
 

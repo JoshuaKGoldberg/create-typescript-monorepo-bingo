@@ -118,9 +118,14 @@ export const blockGitHubActionsCI = rootBase.createBlock({
 
     // Stratum re-runs a Block whenever its props change, and job arrays only grow,
     // so an earlier version of a job can still be in props: the latest one wins.
+    // The engines check installs every workspace package, so it only applies when all of
+    // them are CTM's: a site or other repository-owned package may need newer Node.js.
+    const hasUnmanaged = (options.packages ?? []).some(
+      (pkg) => pkg.kind === 'site' || pkg.kind === 'repo-owned',
+    );
     const byId = new Map<string, CIJob>();
     for (const job of jobs) {
-      if (!(job.id === 'engines_check' && props.setupLacksInstallFlags)) {
+      if (!(job.id === 'engines_check' && (props.setupLacksInstallFlags || hasUnmanaged))) {
         byId.set(job.id, job);
       }
     }
