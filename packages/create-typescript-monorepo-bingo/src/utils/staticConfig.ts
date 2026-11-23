@@ -491,10 +491,10 @@ const keyedTypes = new Set([
  * Collects the identifiers a node refers to, leaving out property names and object keys,
  * which aren't references, and strings and comments, which aren't in the AST.
  */
-function collectReferences(node: unknown, names: Set<string>): void {
+function collectReferences(node: unknown, names: Set<string>, binding = false): void {
   if (Array.isArray(node)) {
     for (const child of node) {
-      collectReferences(child, names);
+      collectReferences(child, names, binding);
     }
     return;
   }
@@ -505,7 +505,11 @@ function collectReferences(node: unknown, names: Set<string>): void {
 
   const current = node as AstNode;
   if (current.type === 'Identifier') {
-    names.add(current.name as string);
+    // A declared name isn't a reference, but its type annotation may hold some.
+    if (!binding) {
+      names.add(current.name as string);
+    }
+    collectReferences(current.typeAnnotation, names);
     return;
   }
 
@@ -513,12 +517,19 @@ function collectReferences(node: unknown, names: Set<string>): void {
     const isName =
       (key === 'property' && current.type === 'MemberExpression' && !current.computed) ||
       (key === 'key' && keyedTypes.has(current.type) && !current.computed) ||
-      (key === 'right' && current.type === 'TSQualifiedName') ||
-      // A declared name, like a variable's or a function's, isn't a reference to an import.
-      key === 'id';
-    if (!isName) {
-      collectReferences(value, names);
+      (key === 'right' && current.type === 'TSQualifiedName');
+    if (isName) {
+      continue;
     }
+
+    // Declared names, like a variable's, a function's or its parameters', are bindings:
+    // only what's inside them, like defaults and computed keys, can be references.
+    const declares = key === 'id' || key === 'params' || (binding && key !== 'right');
+    collectReferences(
+      value,
+      names,
+      declares && !(key === 'key' && current.computed) && key !== 'typeAnnotation',
+    );
   }
 }
 

@@ -71,6 +71,10 @@ export const blockRootPackageJson = rootBase.createBlock({
         !existing.repository && {
           repository: { type: 'git', url: getRepositoryUrl(options) },
         }),
+      // CTM's package.json lint rules require a description.
+      ...(props.existing !== undefined &&
+        !existing.description &&
+        options.description && { description: options.description }),
       // Tool settings, like lint-staged and simple-git-hooks, only fill in what's missing.
       ...deepWithDefaults(existing, props.properties ?? {}),
       // Existing scripts keep their order; a new file's are sorted.

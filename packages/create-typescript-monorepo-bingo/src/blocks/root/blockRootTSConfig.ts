@@ -60,11 +60,24 @@ export const blockRootTSConfig = rootBase.createBlock({
     // Package config files, like tsdown.config.ts, aren't in any package's tsconfig.
     const packageConfigGlobs = getPackageGlobs(options, '*.config.ts').map((glob) => `./${glob}`);
     const existingInclude = existing.include as string[] | undefined;
+    // Config files, like CTM's eslint.config.ts, need a tsconfig for typed linting: an
+    // existing include gets the globs for any it doesn't already cover.
+    const configGlobs = ['./*.config.ts', ...packageConfigGlobs];
     const include = new Set([
-      ...(existingInclude ?? ['./*.config.ts', ...packageConfigGlobs]),
-      // An include with package config globs gets ones for new package directories too.
-      ...(existingInclude?.some((glob) => /^\.\/.+\/\*\.config\.ts$/.test(glob))
-        ? packageConfigGlobs
+      ...(existingInclude ?? configGlobs),
+      ...(existingInclude
+        ? configGlobs.filter(
+            (glob) =>
+              !existingInclude.some((entry) =>
+                // A config CTM writes there: eslint.config.ts, or packages/x/tsdown.config.ts.
+                includeCovers(
+                  entry,
+                  glob === './*.config.ts'
+                    ? 'eslint.config.ts'
+                    : glob.slice(2).replace('*.config', 'tsdown.config').replaceAll('*', 'x'),
+                ),
+              ),
+          )
         : []),
       ...(props.include ?? []),
     ]);
@@ -111,4 +124,39 @@ export const blockRootTSConfig = rootBase.createBlock({
 
 function normalizePath(path: string) {
   return path.replace(/^\.\//, '').replace(/\/$/, '');
+}
+
+/**
+ * Whether a tsconfig include entry covers a file path, as TypeScript matches them:
+ * `*` and `?` within a path segment, `**` across segments, and plain paths as directories.
+ */
+function includeCovers(entry: string, file: string): boolean {
+  const normalized = entry.replace(/^\.\//, '').replace(/\/$/, '');
+  if (normalized === '' || normalized === '.') {
+    return true;
+  }
+
+  // A plain path without an extension is a directory, like src.
+  if (!/[*?]/.test(normalized) && !/\.[cm]?[jt]sx?$/.test(normalized)) {
+    return file.startsWith(`${normalized}/`);
+  }
+
+  const segments = normalized.split('/');
+  // A trailing ** matches every file below it, as **/* does.
+  if (segments.at(-1) === '**') {
+    segments.push('*');
+  }
+
+  const pattern = segments
+    .map((segment) =>
+      segment === '**'
+        ? '(?:[^/]+/)*'
+        : `${segment
+            .replaceAll(/[.+^${}()|[\]\\]/g, '\\$&')
+            .replaceAll('*', '[^/]*')
+            .replaceAll('?', '[^/]')}/`,
+    )
+    .join('')
+    .slice(0, -1);
+  return new RegExp(`^${pattern}$`).test(file);
 }

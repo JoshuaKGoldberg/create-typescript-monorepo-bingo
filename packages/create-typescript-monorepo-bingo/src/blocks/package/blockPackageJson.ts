@@ -50,7 +50,9 @@ export const blockPackageJson = packageBase.createBlock({
     const ours: Partial<Record<DependencyField, Dependencies>> = {
       dependencies: props.dependencies,
       devDependencies: {
-        [getBuildPackageName(options)]: 'workspace:^',
+        // Existing packages that don't use the build package, like ones with their own
+        // tsconfig, would have it as an unused dependency.
+        ...((isNew || pkg.usesBuildPackage) && { [getBuildPackageName(options)]: 'workspace:^' }),
         // Existing packages keep their own choice of whether to use Node.js types.
         ...(isNew && { '@types/node': pin('@types/node') }),
         ...(isNew && getSiblingToolDependencies(options, pkg)),

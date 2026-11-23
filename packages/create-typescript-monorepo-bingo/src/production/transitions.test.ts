@@ -1,4 +1,4 @@
-// cspell:ignore widgetco zentrix zorbix
+// cspell:ignore quandrix widgetco zentrix zorbix
 import type { CreatedDirectory, IntakeDirectory } from 'bingo-fs';
 import { describe, expect, it, vi } from 'vitest';
 import { parse as parseYaml } from 'yaml';
@@ -1271,6 +1271,82 @@ describe('round 11 regressions', () => {
     expect(
       prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).recursiveBuild,
     ).toBe(expected);
+  });
+});
+
+describe('round 14 regressions', () => {
+  const editRoot = (files: IntakeDirectory, edit: (manifest: Record<string, unknown>) => void) => {
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as Record<string, unknown>;
+    edit(manifest);
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+  };
+
+  it("doesn't add the build package to an existing package that doesn't use it", () => {
+    const files = createRepository();
+    setFile(files, 'packages/example/tsconfig.json', '{ "extends": "../../tsconfig.base.json" }\n');
+    setFile(
+      files,
+      'packages/example/tsdown.config.ts',
+      "export default { entry: ['src/index.ts'] };\n",
+    );
+    const pkg = JSON.parse(getFile(files, 'packages/example/package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+    };
+    delete pkg.devDependencies['@example/build'];
+    setFile(files, 'packages/example/package.json', JSON.stringify(pkg, null, 2));
+
+    expect(getFile(transition(files).files, 'packages/example/package.json')).not.toContain(
+      '@example/build',
+    );
+  });
+
+  it('adds config globs an existing root include does not cover', () => {
+    const files = createRepository();
+    setFile(files, 'tsconfig.json', '{ "include": ["packages/*/src"] }\n');
+
+    const tsconfig = getFile(transition(files).files, 'tsconfig.json');
+
+    expect(tsconfig).toContain('"./*.config.ts"');
+    expect(tsconfig).toContain('"./packages/*/*.config.ts"');
+
+    setFile(files, 'tsconfig.json', '{ "include": ["**/*"] }\n');
+
+    expect(getFile(transition(files).files, 'tsconfig.json')).not.toContain('*.config.ts');
+  });
+
+  it('suggests the Knip ignores a commented knip.config.ts is missing', () => {
+    const files = createRepository();
+    setFile(files, 'knip.config.ts', "// Our own.\nexport default { workspaces: { '.': {} } };\n");
+
+    expect(transition(files).suggestions).toContainEqual(
+      expect.stringContaining('@changesets/cli'),
+    );
+  });
+
+  it('allows title words in spell checking for a new repository', () => {
+    const files = createRepository({ title: 'Quandrix Toolkit' });
+
+    expect(getFile(files, 'cspell.json')).toContain('"quandrix"');
+  });
+
+  it("doesn't count vue-tsc as running tsc", () => {
+    const files = createRepository();
+    editRoot(files, (manifest) => {
+      (manifest.scripts as Record<string, string>).typecheck = 'vue-tsc --noEmit';
+    });
+
+    expect(getFile(transition(files).files, 'knip.config.ts')).toContain("'typescript7'");
+  });
+
+  it('fills in a missing root description', () => {
+    const files = createRepository();
+    editRoot(files, (manifest) => {
+      delete manifest.description;
+    });
+
+    expect(getFile(transition(files).files, 'package.json')).toContain(
+      '"description": "An example monorepo."',
+    );
   });
 });
 

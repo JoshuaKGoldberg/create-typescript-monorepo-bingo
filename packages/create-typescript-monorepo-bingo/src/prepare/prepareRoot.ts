@@ -210,7 +210,12 @@ export function inferPackageKind({ directory, files, manifest }: WorkspacePackag
 function createPackageSpec(pkg: WorkspacePackage, all: WorkspacePackage[]): PackageSpec {
   const tsconfig = readJson(pkg.files, 'tsconfig.json') as
     | undefined
-    | { compilerOptions?: { isolatedDeclarations?: boolean } };
+    | {
+        compilerOptions?: { isolatedDeclarations?: boolean };
+        extends?: unknown;
+        files?: unknown;
+        include?: unknown;
+      };
   const dependencies = getAllDependencies(pkg.manifest);
   const workspaceNames = new Set(all.map((other) => other.manifest.name));
   const workspaceDependencies = Object.entries(dependencies)
@@ -227,11 +232,35 @@ function createPackageSpec(pkg: WorkspacePackage, all: WorkspacePackage[]): Pack
       tsdownWorkspaceReady: false,
     }),
     kind: inferPackageKind(pkg),
+    ...(usesBuildPackage(tsconfig, readText(pkg.files, 'tsdown.config.ts')) && {
+      usesBuildPackage: true,
+    }),
     name: pkg.manifest.name ?? pkg.directory.split('/').pop() ?? pkg.directory,
     ...(pkg.manifest.scripts && { scripts: Object.keys(pkg.manifest.scripts) }),
     ...getToolDevDependencies(pkg.manifest),
     ...(workspaceDependencies.length && { workspaceDependencies }),
   };
+}
+
+/**
+ * Whether a package uses the build package: its tsconfig extends the shared base, or will
+ * once CTM adds the missing extends, or its tsdown config imports the shared base.
+ */
+function usesBuildPackage(
+  tsconfig: undefined | { extends?: unknown; files?: unknown; include?: unknown },
+  tsdownConfig: string | undefined,
+) {
+  const isSolution = [tsconfig?.files, tsconfig?.include].some(
+    (list) => Array.isArray(list) && !list.length,
+  );
+  const extended = [tsconfig?.extends].flat();
+  return (
+    (!!tsconfig &&
+      !isSolution &&
+      (tsconfig.extends === undefined ||
+        extended.some((base) => typeof base === 'string' && base.includes('/build/tsconfig')))) ||
+    /['"][^'"]*\/build(?:\/tsdown)?['"]/.test(tsdownConfig ?? '')
+  );
 }
 
 function getAllDependencies(manifest: PackageManifest): Record<string, string> {

@@ -120,7 +120,9 @@ export const blockBuildPackage = rootBase.createBlock({
       // Knip counts the TypeScript 7 alias as used through a root script that runs tsc,
       // like CTM's typecheck, which a repository's own typecheck script replaces.
       ...(rootScripts.typecheck !== undefined &&
-        !Object.values(rootScripts).some((script) => script && /\btsc\b/.test(script)) && {
+        !Object.values(rootScripts).some(
+          (script) => script && /(?:^|[\s;&|(])tsc(?:\s|$)/.test(script),
+        ) && {
           rootLacksTsc: true,
         }),
       ...(rootBuild !== undefined && { rootBuild }),

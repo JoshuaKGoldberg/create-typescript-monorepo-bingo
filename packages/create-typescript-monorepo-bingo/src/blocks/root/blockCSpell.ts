@@ -98,7 +98,10 @@ export const blockCSpell = rootBase.createBlock({
                   list('words'),
                   [
                     ...(list('ignorePaths')?.includes('.github') ? [] : (props.words ?? [])),
-                    ...getNameWords(options, props.existing === undefined),
+                    ...getNameWords(options, props.existing === undefined).filter(
+                      (word) =>
+                        !list('words')?.some((existingWord) => existingWord.toLowerCase() === word),
+                    ),
                   ],
                   compareCaseInsensitive,
                 ),
@@ -111,13 +114,16 @@ export const blockCSpell = rootBase.createBlock({
 });
 
 /**
- * Gets words from names CTM writes into files, like the owner in LICENSE.md and authors,
+ * Gets words from names CTM writes into files, like the owner in LICENSE.md, authors and
+ * the title in READMEs,
  * which may not be dictionary words. An existing cspell.json already passes for the
  * repository's names, so it only gets a new package's.
  */
 function getNameWords(options: RootOptions, isNew: boolean): string[] {
   const names = [
-    ...(isNew ? [options.owner, options.author, options.repository, options.scope] : []),
+    ...(isNew
+      ? [options.owner, options.author, options.repository, options.scope, options.title]
+      : []),
     options.newPackage,
   ];
   // cspell skips words shorter than four letters.

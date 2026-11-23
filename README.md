@@ -148,6 +148,7 @@ A transition adds what a repository is missing and leaves what it has:
 - A solution-style root `tsconfig.json`, with `"files": []`, is left as it is, so new packages' `tsdown.config.ts` files aren't in any tsconfig: add them to one for typed linting.
 - New packages get `build` and `test` scripts; other per-package scripts a task runner runs, like `lint`, are left to add, since sibling packages' commands may not apply to a new one.
 - The weekly transitions workflow doesn't regenerate an `actions.lock` file; re-run `gh actions-lock` when a transition PR changes workflow pins.
+- `cspell.json` gets words for the owner, author, repository, scope, title and new package names CTM writes, but not for descriptions, which are your own prose: add any uncommon words in them.
 - pnpm 12.0.0 or newer is needed.
 
 ## Development

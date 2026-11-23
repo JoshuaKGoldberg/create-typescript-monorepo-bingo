@@ -26,6 +26,11 @@ export const packageSpecSchema = z.object({
    */
   toolDevDependencies: z.record(z.string(), z.string()).optional(),
   tsdownWorkspaceReady: z.boolean().optional(),
+
+  /**
+   * Whether an existing package uses the build package's tsconfig or tsdown base.
+   */
+  usesBuildPackage: z.boolean().optional(),
   workspaceDependencies: z.array(z.string()).optional(),
 });
 

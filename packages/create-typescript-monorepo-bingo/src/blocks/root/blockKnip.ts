@@ -71,7 +71,19 @@ export const blockKnip = rootBase.createBlock({
       ),
     };
 
+    // A kept config still needs the ignores for dependencies CTM adds that Knip can't see used.
+    const missingIgnores = keepExisting
+      ? ['@changesets/cli', ...(props.ignoreDependencies ?? [])].filter(
+          (dependency) => !rootIgnores?.includes(dependency),
+        )
+      : [];
+
     return withoutAlternate(props.alternate, 'knip.config.ts', {
+      suggestions: missingIgnores.length
+        ? [
+            `knip.config.ts has comments or code CTM can't rewrite, so it was left as it is. Add these to its workspaces['.'].ignoreDependencies, which Knip can't see used: ${missingIgnores.join(', ')}.`,
+          ]
+        : [],
       extensions: [
         blockGitHubActionsCI({
           jobs: [{ id: 'knip', name: 'Knip', steps: [{ run: 'pnpm knip' }] }],

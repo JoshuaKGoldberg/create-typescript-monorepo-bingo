@@ -78,12 +78,19 @@ describe(prepareRoot, () => {
       nodeEngines: '>=22',
       owner: 'my-org',
       packages: [
-        { directory: 'packages/a', isolatedDeclarations: true, kind: 'library', name: 'a' },
+        {
+          directory: 'packages/a',
+          isolatedDeclarations: true,
+          kind: 'library',
+          name: 'a',
+          usesBuildPackage: true,
+        },
         {
           directory: 'packages/b',
           kind: 'library',
           name: 'b',
           scripts: ['test'],
+          usesBuildPackage: true,
           workspaceDependencies: ['a'],
         },
         { directory: 'packages/build', kind: 'build', name: '@my/build' },
