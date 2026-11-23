@@ -1,6 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
 
-import semver from 'semver';
 import {
   type Document,
   isMap,
@@ -54,32 +53,89 @@ function formatWorkflow(value: unknown): string {
 export function formatYamlFile(
   value: unknown,
   existingText: string | undefined,
-  { workflow = false }: { workflow?: boolean } = {},
+  { name, workflow = false }: { name?: string; workflow?: boolean } = {},
 ): string {
   if (existingText === undefined) {
     return workflow ? formatWorkflow(value) : formatYaml(value);
   }
 
   const document = parseDocument(existingText);
+  if (document.errors.length) {
+    throw new Error(
+      `Could not parse ${name ?? 'a YAML file'}: ${document.errors[0]?.message ?? ''} Fix it, then re-run.`,
+    );
+  }
+
   const merged = workflow ? withExistingJobs(value, document.toJS()) : value;
   document.contents = mergeNode(document, document.contents, merged) as typeof document.contents;
 
-  return document.toString({ lineWidth: 0, singleQuote: true }).replaceAll(/[ \t]+$/gm, '');
+  const text = document.toString({ lineWidth: 0, singleQuote: true }).replaceAll(/[ \t]+$/gm, '');
+  return workflow ? text.replaceAll(/: null$/gm, ': ~') : text;
 }
 
 /**
- * Keeps jobs in an existing workflow that CTM doesn't produce, such as hand-written ones.
+ * Prepares a workflow value for merging into an existing workflow:
+ * - workflow-level \`on\`, \`permissions\` and \`concurrency\` that exist are the repository's;
+ * - CTM's jobs are matched to existing ones by id (ignoring \`-\` vs \`_\`) or by the
+ *   distinctive action they use, and take the existing job's id;
+ * - existing jobs CTM doesn't produce are kept.
  */
 function withExistingJobs(value: unknown, existing: unknown): unknown {
-  if (!isPlainObject(value) || !isPlainObject(existing) || !isPlainObject(existing.jobs)) {
+  if (!isPlainObject(value) || !isPlainObject(existing)) {
     return value;
   }
 
-  const jobs = isPlainObject(value.jobs) ? value.jobs : {};
-  return {
-    ...value,
-    jobs: { ...jobs, ...omitKeys(existing.jobs, Object.keys(jobs)) },
-  };
+  const keptKeys = new Set(['concurrency', 'on', 'permissions'].filter((key) => key in existing));
+  const result: Record<string, unknown> = Object.fromEntries(
+    Object.entries(value).filter(([key]) => !keptKeys.has(key)),
+  );
+
+  const existingJobs = isPlainObject(existing.jobs) ? existing.jobs : {};
+  const jobs: Record<string, unknown> = {};
+  for (const [id, job] of Object.entries(isPlainObject(value.jobs) ? value.jobs : {})) {
+    jobs[findExistingJobId(id, job, existingJobs) ?? id] = job;
+  }
+
+  if (isPlainObject(value.jobs) || isPlainObject(existing.jobs)) {
+    result.jobs = { ...jobs, ...omitKeys(existingJobs, Object.keys(jobs)) };
+  }
+
+  return result;
+}
+
+function findExistingJobId(
+  id: string,
+  job: unknown,
+  existingJobs: Record<string, unknown>,
+): string | undefined {
+  const normalized = normalizeJobId(id);
+  const byId = Object.keys(existingJobs).find(
+    (existingId) => normalizeJobId(existingId) === normalized,
+  );
+  if (byId) {
+    return byId;
+  }
+
+  const actions = getDistinctiveActions(job);
+  return Object.entries(existingJobs).find(([, existingJob]) =>
+    getDistinctiveActions(existingJob).some((action) => actions.includes(action)),
+  )?.[0];
+}
+
+function normalizeJobId(id: string) {
+  return id.toLowerCase().replaceAll('-', '_');
+}
+
+function getDistinctiveActions(job: unknown): string[] {
+  const steps = isPlainObject(job) && Array.isArray(job.steps) ? job.steps : [];
+  return steps
+    .map((step) =>
+      isPlainObject(step) && typeof step.uses === 'string' ? normalizeUses(step.uses) : '',
+    )
+    .filter(
+      (uses) =>
+        uses && !uses.startsWith('$/') && !uses.startsWith('./') && uses !== 'actions/checkout',
+    );
 }
 
 function omitKeys(value: Record<string, unknown>, keys: string[]) {
@@ -159,11 +215,10 @@ function mergeNode(document: Document, node: unknown, value: unknown, key?: stri
 
     // Matrices follow CTM's settings, such as the Node.js versions from engines.node.
     if (key === 'node-version' || key === 'os') {
-      node.items = value.map((item, index) =>
-        index < node.items.length
-          ? mergeNode(document, node.items[index], item)
-          : document.createNode(item),
-      );
+      node.items = value.map((item) => {
+        const same = node.items.find((existing) => isScalar(existing) && existing.value === item);
+        return same ?? document.createNode(item);
+      });
       return node;
     }
 
@@ -172,10 +227,10 @@ function mergeNode(document: Document, node: unknown, value: unknown, key?: stri
     return node;
   }
 
+  // Existing values are the repository's: CTM only fills in what's missing. Version bumps,
+  // like action refs, are Renovate's job.
   if (isScalar(node) && (value === null || typeof value !== 'object')) {
-    if (node.value !== value && !(key === 'uses' && keepsExistingAction(node.value, value))) {
-      node.value = value;
-    }
+    node.value ??= value;
 
     return node;
   }
@@ -204,7 +259,10 @@ function mergeSequence(document: Document, existing: unknown[], value: unknown[]
   for (const item of value) {
     const index = unmatched.findIndex((node) => isSameItem(node, item));
     if (index === -1) {
-      merged.push(document.createNode(item));
+      // Steps CTM doesn't find in an existing job aren't added: the job is the repository's.
+      if (!existing.length) {
+        merged.push(document.createNode(item));
+      }
       continue;
     }
 
@@ -224,7 +282,11 @@ function isSameItem(node: unknown, item: unknown) {
     const ours = item[key];
     const theirs = node.get(key);
     if (typeof ours === 'string' && typeof theirs === 'string') {
-      return key === 'uses' ? withoutVersion(ours) === withoutVersion(theirs) : ours === theirs;
+      return key === 'uses'
+        ? normalizeUses(ours) === normalizeUses(theirs)
+        : key === 'run'
+          ? normalizeRun(ours) === normalizeRun(theirs)
+          : ours === theirs;
     }
   }
 
@@ -232,31 +294,13 @@ function isSameItem(node: unknown, item: unknown) {
   return isDeepStrictEqual(node.toJSON(), item);
 }
 
-/**
- * Whether an existing \`uses:\` reference should be kept over CTM's: it's pinned to a commit
- * SHA (as Renovate's best practices do), or to a version at least as new as CTM's.
- */
-function keepsExistingAction(existing: unknown, ours: unknown) {
-  if (typeof existing !== 'string' || typeof ours !== 'string') {
-    return false;
-  }
-
-  if (withoutVersion(existing) !== withoutVersion(ours)) {
-    return false;
-  }
-
-  const existingRef = existing.slice(existing.lastIndexOf('@') + 1);
-  if (/^[0-9a-f]{40}$/.test(existingRef)) {
-    return true;
-  }
-
-  const existingVersion = semver.coerce(existingRef);
-  const ourVersion = semver.coerce(ours.slice(ours.lastIndexOf('@') + 1));
-  return !!existingVersion && !!ourVersion && semver.gte(existingVersion, ourVersion);
+function normalizeUses(uses: string) {
+  const at = uses.indexOf('@', 1);
+  return (at === -1 ? uses : uses.slice(0, at)).toLowerCase();
 }
 
-function withoutVersion(uses: string) {
-  return uses.replace(/@[^@/]*$/, '');
+function normalizeRun(run: string) {
+  return run.trim().replace(/^pnpm run /, 'pnpm ');
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

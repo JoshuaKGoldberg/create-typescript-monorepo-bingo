@@ -87,10 +87,8 @@ export const alternateConfigFiles = {
     'cspell.yaml',
   ],
   eslint: [
-    '.eslintrc.cjs',
-    '.eslintrc.js',
-    '.eslintrc.json',
     'eslint.config.cjs',
+    'eslint.config.cts',
     'eslint.config.js',
     'eslint.config.mjs',
     'eslint.config.mts',
@@ -100,6 +98,7 @@ export const alternateConfigFiles = {
     '.knip.jsonc',
     'knip.config.js',
     'knip.config.mjs',
+    'knip.js',
     'knip.json',
     'knip.jsonc',
     'knip.ts',
@@ -113,7 +112,15 @@ export const alternateConfigFiles = {
     'renovate.json',
     'renovate.json5',
   ],
-  vitest: ['vitest.config.js', 'vitest.config.mjs', 'vitest.config.mts'],
+  vitest: [
+    'vite.config.js',
+    'vite.config.mjs',
+    'vite.config.mts',
+    'vite.config.ts',
+    'vitest.config.js',
+    'vitest.config.mjs',
+    'vitest.config.mts',
+  ],
 } as const;
 
 /**
@@ -159,9 +166,34 @@ export function withoutAlternate<Creation extends { files?: object; suggestions?
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete directory[fileName];
 
+  // The repository configures the tool itself, so its dependencies, scripts and CI jobs
+  // aren't CTM's to add either.
   return {
     ...creation,
+    extensions: [],
     files,
     suggestions: [...(creation.suggestions ?? []), describeAlternateConfig(alternate, filePath)],
   };
+}
+
+/**
+ * The first line of files CTM owns entirely. An existing file without it is the
+ * repository's own, and is left alone with a suggestion, so nothing is overwritten
+ * without the repository opting in.
+ */
+export const ownedFileMarker =
+  '// Managed by create-typescript-monorepo-bingo: changes here are replaced on transitions.';
+
+/**
+ * Whether CTM may write an owned file: it's new, or it carries the marker.
+ */
+export function isOwnedFile(text: string | undefined): boolean {
+  return text === undefined || text.startsWith(ownedFileMarker);
+}
+
+/**
+ * Creates the suggestion shown when CTM leaves an unmarked owned file alone.
+ */
+export function describeUnownedFile(filePath: string): string {
+  return `${filePath} wasn't created by create-typescript-monorepo-bingo, so it wasn't replaced. Delete it, or add "${ownedFileMarker}" as its first line, to have it managed.`;
 }

@@ -65,6 +65,9 @@ export const rootOptionsShape = {
   description: z.string().describe('sentence-case description of the repository'),
   directory: z.string().optional().describe('directory to create the repository in'),
   email: z.string().optional().describe('author email for package.json files'),
+  formatter: literalUnion(['oxfmt', 'prettier'] as const)
+    .optional()
+    .describe("formatter: 'oxfmt', or 'prettier' for repositories that already use it"),
   newPackage: z
     .string()
     .optional()
@@ -92,6 +95,10 @@ export const rootOptionsShape = {
     .string()
     .optional()
     .describe('dependency name that aliases TypeScript 7 for the tsc binary'),
+  vitestConfig: z
+    .string()
+    .optional()
+    .describe('file name of the root Vitest config, if not vitest.config.ts'),
   workflowExtension: literalUnion(['yaml', 'yml'] as const)
     .optional()
     .describe('file extension for GitHub Actions workflow files'),

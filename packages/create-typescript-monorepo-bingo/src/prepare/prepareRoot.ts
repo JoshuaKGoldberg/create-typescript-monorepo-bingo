@@ -41,14 +41,20 @@ export function prepareRoot(
   }
 
   const rootManifest = readJson(files, 'package.json') as PackageManifest | undefined;
+  assertMonorepoRoot(rootManifest);
   const workspace = readWorkspaceYaml(files);
   const workspacePackages = findWorkspacePackages(files, workspace?.packages ?? ['packages/*']);
   const repository = parseRepository(rootManifest?.repository);
   const author = getFirstPerson(rootManifest);
-  const scope = workspacePackages
+  const scopes = workspacePackages
     .map((pkg) => pkg.manifest.name)
-    .find((name) => name?.startsWith('@') && name.endsWith('/build'))
-    ?.replace(/\/build$/, '');
+    .filter((name) => name?.startsWith('@'))
+    .map((name) => name?.split('/')[0]);
+  const scope =
+    workspacePackages
+      .map((pkg) => pkg.manifest.name)
+      .find((name) => name?.startsWith('@') && name.endsWith('/build'))
+      ?.replace(/\/build$/, '') ?? mostCommon(scopes);
 
   const catalogs = context.options.catalogs ?? inferCatalogMode(workspace);
   const packages = workspacePackages.map((pkg) => createPackageSpec(pkg, workspacePackages));
@@ -85,14 +91,16 @@ export function prepareRoot(
     ...(scope && { scope }),
     taskRunner: inferTaskRunner(files, workspace),
     ...inferTitle(files),
-    ...inferTypeScript7Alias(rootManifest),
+    ...inferTypeScript7Alias(rootManifest, workspace),
+    ...inferFormatter(files, rootManifest),
+    ...inferVitestConfig(files),
     ...inferWorkflowExtension(files),
   };
 }
 
 interface WorkspaceYaml {
   catalog?: Record<string, string>;
-  catalogs?: Record<string, Record<string, string>>;
+  catalogs?: Partial<Record<string, Record<string, string>>>;
   packages?: string[];
   tasks?: unknown;
 }
@@ -216,8 +224,10 @@ function getAllDependencies(manifest: PackageManifest): Record<string, string> {
 }
 
 function inferCatalogMode(workspace: undefined | WorkspaceYaml): CatalogMode {
-  // catalogs.default is another way to write the default catalog.
-  if (Object.keys(workspace?.catalogs ?? {}).some((name) => name !== 'default')) {
+  // Named mode is CTM's dev/prod/peer catalogs; other named catalogs are the repository's.
+  if (
+    Object.keys(workspace?.catalogs ?? {}).some((name) => ['dev', 'peer', 'prod'].includes(name))
+  ) {
     return 'named';
   }
 
@@ -293,7 +303,7 @@ const namedCatalogs: Partial<Record<DependencyField, string>> = {
  */
 export function findNamedConflicts(
   manifests: ManifestWithKind[],
-  catalogs: Record<string, Record<string, string>> = {},
+  catalogs: Partial<Record<string, Record<string, string>>> = {},
 ): string[] {
   const specifiers = new Map<string, Set<string>>();
 
@@ -321,7 +331,7 @@ export function findNamedConflicts(
 
   // A literal that differs from the existing catalog entry is a conflict too.
   for (const [catalog, entries] of Object.entries(catalogs)) {
-    for (const [dependency, specifier] of Object.entries(entries)) {
+    for (const [dependency, specifier] of Object.entries(entries ?? {})) {
       specifiers
         .get(`${catalog}:${dependency}`)
         ?.add(getWrittenCatalogEntry(dependency, specifier));
@@ -365,8 +375,10 @@ function getFirstPerson(manifest: PackageManifest | undefined) {
   }
 
   if (typeof person === 'string') {
-    const match = /^([^<(]+?)\s*(?:<([^>]+)>)?/.exec(person);
-    return match?.[1] ? { email: match[2], name: match[1] } : undefined;
+    // "Name <email> (url)", parsed without backtracking-prone patterns.
+    const name = person.split(/[<(]/)[0]?.trim();
+    const email = /<([^>]+)>/.exec(person)?.[1];
+    return name ? { email, name } : undefined;
   }
 
   return person;
@@ -374,7 +386,11 @@ function getFirstPerson(manifest: PackageManifest | undefined) {
 
 function parseRepository(repository: PackageManifest['repository']) {
   const url = typeof repository === 'string' ? repository : repository?.url;
-  const match = url && /github\.com[/:]([^/]+)\/([^/#]+?)(?:\.git)?(?:[/#]|$)/.exec(url);
+  // Full URLs, and npm's "owner/repo" and "github:owner/repo" shorthands.
+  const match =
+    url &&
+    (/github\.com[/:]([^/]+)\/([^/#]+?)(?:\.git)?(?:[/#]|$)/.exec(url) ??
+      /^(?:github:)?([\w.-]+)\/([\w.-]+?)(?:\.git)?$/.exec(url));
   return match?.[1] && match[2] ? { owner: match[1], repository: match[2] } : undefined;
 }
 
@@ -403,8 +419,17 @@ function inferTitle(files: IntakeDirectory): Partial<RootOptions> {
   return match?.[1] ? { title: match[1].trim() } : {};
 }
 
-function inferTypeScript7Alias(manifest: PackageManifest | undefined): Partial<RootOptions> {
-  for (const [name, specifier] of Object.entries(manifest?.devDependencies ?? {})) {
+function inferTypeScript7Alias(
+  manifest: PackageManifest | undefined,
+  workspace: undefined | WorkspaceYaml,
+): Partial<RootOptions> {
+  for (const [name, declared] of Object.entries(manifest?.devDependencies ?? {})) {
+    // Look through catalog references, as flint's catalog:dev alias needs.
+    const specifier = declared.startsWith('catalog:')
+      ? ((declared === 'catalog:'
+          ? (workspace?.catalog?.[name] ?? workspace?.catalogs?.default?.[name])
+          : workspace?.catalogs?.[declared.slice('catalog:'.length)]?.[name]) ?? declared)
+      : declared;
     const alias = parseNpmAlias(specifier);
     if (
       name !== 'typescript' &&
@@ -435,4 +460,71 @@ function inferWorkflowExtension(files: IntakeDirectory): Partial<RootOptions> {
   }
 
   return {};
+}
+
+/**
+ * Refuses repositories whose root package.json is itself a published package: CTM manages
+ * monorepos whose root is private, with packages in workspace directories.
+ */
+function assertMonorepoRoot(manifest: PackageManifest | undefined) {
+  const root = manifest as (PackageManifest & Record<string, unknown>) | undefined;
+  if (root && !root.private && (root.main || root.exports || root.bin || root.module)) {
+    throw new Error(
+      `The root package.json is a published package${root.name ? ` (${root.name})` : ''}. create-typescript-monorepo-bingo manages monorepos with a private root and packages in workspace directories; for a single-package repository, see create-typescript-app.`,
+    );
+  }
+}
+
+function mostCommon(values: (string | undefined)[]) {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    if (value) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
+const prettierConfigs = [
+  '.prettierrc',
+  '.prettierrc.cjs',
+  '.prettierrc.js',
+  '.prettierrc.json',
+  '.prettierrc.json5',
+  '.prettierrc.mjs',
+  '.prettierrc.toml',
+  '.prettierrc.yaml',
+  '.prettierrc.yml',
+  'prettier.config.cjs',
+  'prettier.config.js',
+  'prettier.config.mjs',
+  'prettier.config.ts',
+];
+
+/**
+ * Infers the formatter: a repository that uses Prettier and not Oxfmt keeps Prettier.
+ */
+function inferFormatter(
+  files: IntakeDirectory,
+  manifest: PackageManifest | undefined,
+): Partial<RootOptions> {
+  const record = manifest as (PackageManifest & Record<string, unknown>) | undefined;
+  const dependencies = { ...(record?.dependencies as object), ...manifest?.devDependencies };
+  const usesOxfmt = 'oxfmt' in dependencies || !!getEntry(files, 'oxfmt.config.ts');
+  const usesPrettier =
+    'prettier' in dependencies ||
+    !!record?.prettier ||
+    prettierConfigs.some((name) => getEntry(files, name));
+
+  return usesPrettier && !usesOxfmt ? { formatter: 'prettier' } : {};
+}
+
+/**
+ * Infers the root Vitest config's file name, when it isn't vitest.config.ts.
+ */
+function inferVitestConfig(files: IntakeDirectory): Partial<RootOptions> {
+  const name = ['vitest.config.mts', 'vitest.config.js', 'vitest.config.mjs'].find((candidate) =>
+    getEntry(files, candidate),
+  );
+  return name ? { vitestConfig: name } : {};
 }

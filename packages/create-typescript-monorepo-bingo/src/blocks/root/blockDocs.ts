@@ -1,8 +1,9 @@
+import type { IntakeDirectory } from 'bingo-fs';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults, type RootOptions } from '../../options.ts';
-import { getEntry } from '../../utils/files.ts';
+import { getDirectory } from '../../utils/files.ts';
 import { getRepositoryUrl, usesTaskRunner } from '../../utils/options.ts';
 import { formatYaml } from '../../utils/yaml.ts';
 
@@ -33,7 +34,7 @@ export const blockDocs = rootBase.createBlock({
     return {
       existing: docPaths
         .map((docPath) => resolveDocPath(options, docPath))
-        .filter((docPath) => getEntry(files, docPath) !== undefined),
+        .filter((docPath) => hasEquivalentDoc(files, docPath)),
     };
   },
   props: {
@@ -63,6 +64,29 @@ export const blockDocs = rootBase.createBlock({
     return { files: files as Record<string, string> };
   },
 });
+
+/**
+ * Whether a repository already has a doc, in any letter case, in any of the places
+ * GitHub looks (the root, docs/ and .github/), or, for issue templates, any template.
+ */
+function hasEquivalentDoc(files: IntakeDirectory | undefined, docPath: string) {
+  const segments = docPath.split('/');
+  const fileName = (segments.at(-1) ?? docPath).toLowerCase();
+  const directory = segments.slice(0, -1).join('/');
+
+  if (directory === '.github/ISSUE_TEMPLATE') {
+    const templates = Object.keys(getDirectory(files, directory) ?? {});
+    return templates.some((name) => /\.ya?ml$|\.md$/i.test(name) && name !== 'config.yml');
+  }
+
+  const stem = fileName.replace(/\.md$/, '');
+  return ['', 'docs', '.github'].some((place) =>
+    Object.keys((place ? getDirectory(files, place) : files) ?? {}).some((name) => {
+      const lower = name.toLowerCase();
+      return lower === fileName || (stem === 'license' && lower.startsWith('license'));
+    }),
+  );
+}
 
 function resolveDocPath(options: RootOptions, docPath: string) {
   return docPath.replace('{yaml}', options.workflowExtension ?? defaults.workflowExtension);

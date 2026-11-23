@@ -24,7 +24,7 @@ jobs:
 `);
   });
 
-  it('updates an existing file in place, keeping comments and order', () => {
+  it('keeps existing values, comments and order in place', () => {
     const existing = `jobs:
   test:
     steps:
@@ -40,7 +40,7 @@ jobs:
     ).toBe(`jobs:
   test:
     steps:
-      - uses: codecov/codecov-action@v7.1.1 # v7
+      - uses: codecov/codecov-action@v7.1.0 # v7
         if: success()
 `);
   });

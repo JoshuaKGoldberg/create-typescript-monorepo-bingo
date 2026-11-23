@@ -308,9 +308,20 @@ export interface ESLintExtras {
   imports: string[];
 
   /**
+   * Modules whose CTM import is replaced by the repository's own import of them,
+   * because it declares the same name (for example, adding \`globalIgnores\`).
+   */
+  replacedImports: string[];
+
+  /**
    * Other top-level statements, such as variables the extra configs use, as source text.
    */
   statements: string[];
+
+  /**
+   * Comments after the last config entry.
+   */
+  trailing: string[];
 }
 
 type SpannedNode = AstNode & { end: number; start: number };
@@ -336,10 +347,9 @@ export function readESLintExtras(
   const body = parsed.program.body as unknown as SpannedNode[];
   const own = parseSync('eslint.config.ts', ownSource);
   const ownBody = own.program.body as unknown as SpannedNode[];
+  const ownImportNodes = ownBody.filter((node) => node.type === 'ImportDeclaration');
   const ownImports = new Set(
-    ownBody
-      .filter((node) => node.type === 'ImportDeclaration')
-      .map((node) => normalize(ownSource.slice(node.start, node.end))),
+    ownImportNodes.map((node) => normalize(ownSource.slice(node.start, node.end))),
   );
   const remaining = getConfigArgs(ownBody).map(getESLintConfigSignature);
 
@@ -357,16 +367,30 @@ export function readESLintExtras(
 
   const imports: string[] = [];
   const statements: string[] = [];
+  const declaredNames = new Set<string>();
+  let previousStatementEnd = firstStart;
+
   for (const node of body) {
-    const text = sourceText.slice(node.start, node.end);
+    // Comments directly above a statement, like @ts-expect-error, stay with it.
+    const comments = getComments(sourceText.slice(previousStatementEnd, node.start));
+    previousStatementEnd = node.end;
+    const text = [...comments, sourceText.slice(node.start, node.end)].join('\n');
+
     if (node.type === 'ImportDeclaration') {
-      if (!ownImports.has(normalize(text))) {
+      if (!ownImports.has(normalize(sourceText.slice(node.start, node.end)))) {
         imports.push(text);
+        for (const name of getImportedNames(node)) {
+          declaredNames.add(name);
+        }
       }
     } else if (node !== exported && node !== configDeclaration) {
       statements.push(text);
     }
   }
+
+  const replacedImports = ownImportNodes
+    .filter((node) => getImportedNames(node).some((name) => declaredNames.has(name)))
+    .map((node) => (node.source as { value: string }).value);
 
   const args = getConfigArgs(body);
   const configs: string[] = [];
@@ -386,14 +410,23 @@ export function readESLintExtras(
 
   // Comments after the last entry, before the closing parenthesis or bracket.
   const container = getConfigContainer(body);
-  if (container && args.length) {
-    const trailing = getComments(sourceText.slice(previousEnd, container.end - 1));
-    if (trailing.length) {
-      configs.push(trailing.join('\n  '));
-    }
-  }
+  const trailing =
+    container && args.length ? getComments(sourceText.slice(previousEnd, container.end - 1)) : [];
 
-  return { configs, header, imports, statements };
+  return { configs, header, imports, replacedImports, statements, trailing };
+}
+
+function getImportedNames(node: AstNode): string[] {
+  return (node.specifiers as AstNode[]).map(
+    (specifier) => (specifier.local as AstNode).name as string,
+  );
+}
+
+/**
+ * Whether a config file's source parses.
+ */
+export function isParseable(sourceText: string): boolean {
+  return !parseSync('config.ts', sourceText).errors.length;
 }
 
 function getComments(between: string) {

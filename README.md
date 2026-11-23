@@ -113,37 +113,30 @@ Whatever a package contributes to root files, such as its tsconfig reference or 
 
 ### What Transitions Keep
 
-Versions are never downgraded below what a repository already has, and ranges that already allow CTM's version are left as they are.
-Beyond that, each file is handled one of three ways:
+A transition adds what a repository is missing and leaves what it has:
 
-- **Merged:** `package.json` files, tsconfigs, `pnpm-workspace.yaml`, workflows, VS Code settings, `cspell.json`, Renovate, Changesets and All Contributors configs.
-  CTM updates the keys it manages and keeps everything else: unknown keys, scripts, dependencies, jobs and steps, comments (including in JSONC files), and formatting.
-- **Generated, with additions kept:** `eslint.config.ts` is CTM's config plus any config entries and imports you add after it; edits inside CTM's own entries are replaced.
+- **Values already there win.** Scripts, dependency versions, workflow settings, VS Code settings and config keys a repository has are kept, along with comments (including in JSONC files) and formatting.
+  Upgrades are Renovate's job, and CTM never downgrades or narrows a version.
+  The exceptions: `typescript` switches to the TypeScript 6 alias (from a 6.x version), and CI's Node.js matrices follow `engines.node`.
+- **Missing pieces are added:** config keys, dependencies, scripts, CI jobs, docs and workflows.
+- **`eslint.config.ts`** is CTM's config, plus any config entries, imports and other statements you add; edits inside CTM's own entries are replaced.
   `knip.config.ts` and `oxfmt.config.ts` are rewritten while they're plain static objects without comments, and left alone otherwise.
-- **Owned:** the shared `packages/build` configs and `vitest.config.ts` are CTM's, and are how config stays in sync across repositories.
-- **Repository-owned:** docs, README files, starter sources, a docs site package, and anything CTM doesn't know about are created when missing and never touched again.
-
-To override inferred options, such as a package's `kind`, install the template as a devDependency (`pnpm add -D create-typescript-monorepo-bingo`) and add a `create-typescript-monorepo-bingo.config.ts`:
-
-```ts
-import { createConfig } from 'create-typescript-monorepo-bingo';
-
-export default createConfig({
-  options: {
-    // ...
-  },
-});
-```
+- **Owned files** are replaced on every transition, which is how shared config stays in sync: `vitest.config.ts` and `packages/build/src/tsdown/base.ts`.
+  CTM only replaces one that it created, marked by its first line; an existing file without the marker is left alone, with a suggestion.
+- **Tools a repository already uses are kept:** Prettier instead of Oxfmt, husky, lefthook or nano-staged instead of simple-git-hooks, and release-it, semantic-release or nx release instead of Changesets.
+  Config files with other names, such as `eslint.config.mjs` or `.github/renovate.json5`, are left alone along with that tool's dependencies, scripts and CI jobs, with a suggestion.
+- **Only the files CTM writes are formatted,** with the repository's formatter.
+- **Repository-owned files,** such as docs (in any letter case, at the root, in `docs/` or in `.github/`), issue templates, README files, starter sources, a docs site package, and anything CTM doesn't know about, are created when missing and never touched again.
 
 ### Limitations
 
 - Workspace globs must be single-level (`packages/*`) or exact directories.
 - Packages that aren't built with tsdown are detected as repository-owned and left alone.
 - In named catalog mode, dependencies with different versions across packages stay out of catalogs, with a suggestion printed; stray default-catalog entries are kept as they are.
-- CI matrices follow `engines.node` and are replaced on each transition, and a hand-edited `schedule` is kept.
-  Other lists in merged YAML files, such as branches, are combined, so an entry CTM no longer produces stays until removed by hand.
-- Steps in workflows are matched by their `id`, `name`, `uses` or `run`, so if CTM changes a step's command, the old step stays next to the new one until removed by hand.
-- Config files with alternate names, such as `eslint.config.mjs` or `.github/renovate.json5`, are left alone, with a suggestion to move to CTM's file name.
+- The root `package.json` must be private: repositories whose root is itself a published package are refused.
+- Jobs CTM finds in an existing workflow are the repository's: CTM doesn't add steps to them or change their settings, only adds jobs it doesn't find.
+- Lists in merged YAML files, such as branches, are combined, so an entry CTM no longer produces stays until removed by hand.
+- Switching task runners on an existing repository doesn't replace its existing `build` and `test` scripts.
 - pnpm 12.0.0 or newer is needed.
 
 ## Development

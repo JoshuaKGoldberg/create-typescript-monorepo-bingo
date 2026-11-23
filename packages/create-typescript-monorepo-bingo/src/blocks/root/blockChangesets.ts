@@ -1,3 +1,4 @@
+import type { IntakeDirectory } from 'bingo-fs';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
@@ -37,19 +38,31 @@ export const blockChangesets = rootBase.createBlock({
       `.github/workflows/${getWorkflowPath(options, 'release')}`,
     );
     const existingReadme = readText(files, '.changeset/README.md');
+    const otherReleaseTool = findOtherReleaseTool(files, existingConfig, existingWorkflow);
     return {
       ...(existingConfig && { existingConfig }),
+      ...(otherReleaseTool && { otherReleaseTool }),
       ...(existingReadme && { existingReadme }),
       ...(existingWorkflow && { existingWorkflow }),
     };
   },
   props: {
     existingConfig: z.string().optional(),
+    otherReleaseTool: z.string().optional(),
     existingWorkflow: z.string().optional(),
     existingReadme: z.string().optional(),
     fixed: z.array(z.array(z.string())).optional(),
   },
   produce({ options, props }) {
+    // A repository that releases with another tool keeps it.
+    if (props.otherReleaseTool) {
+      return {
+        suggestions: [
+          `This repository releases with ${props.otherReleaseTool}, so create-typescript-monorepo-bingo's Changesets release workflow wasn't added.`,
+        ],
+      };
+    }
+
     const app = options.releaseApp ?? defaults.releaseApp;
     const existing = parseJsonText(props.existingConfig);
     const config = {
@@ -222,3 +235,37 @@ export const blockChangesets = rootBase.createBlock({
     };
   },
 });
+
+/**
+ * Finds a release tool other than Changesets, which a repository keeps instead.
+ */
+function findOtherReleaseTool(
+  files: IntakeDirectory,
+  changesetConfig: string | undefined,
+  releaseWorkflow: string | undefined,
+): string | undefined {
+  if (changesetConfig !== undefined) {
+    return undefined;
+  }
+
+  const manifest = parseJsonText(readText(files, 'package.json'), 'package.json');
+  const dependencies = {
+    ...(manifest.dependencies as object | undefined),
+    ...(manifest.devDependencies as object | undefined),
+  };
+  const fromDependencies = ['release-it', 'semantic-release', 'release-please', 'lerna'].find(
+    (name) => name in dependencies,
+  );
+  if (fromDependencies) {
+    return fromDependencies;
+  }
+
+  const nx = parseJsonText(readText(files, 'nx.json'), 'nx.json');
+  if (nx.release) {
+    return 'nx release';
+  }
+
+  return releaseWorkflow !== undefined && !releaseWorkflow.includes('changesets/action')
+    ? 'its own release workflow'
+    : undefined;
+}

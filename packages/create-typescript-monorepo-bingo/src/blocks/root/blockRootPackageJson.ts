@@ -1,3 +1,4 @@
+import semver from 'semver';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
@@ -61,7 +62,7 @@ export const blockRootPackageJson = rootBase.createBlock({
       ...props.properties,
       scripts: sortKeys(mergeScripts(existing.scripts as Record<string, string>, props.scripts)),
       devDependencies: sortKeys(dependencies),
-      packageManager: `pnpm@${options.pnpm ?? defaults.pnpm}`,
+      packageManager: getPackageManager(existing.packageManager, options.pnpm ?? defaults.pnpm),
       engines: {
         ...(existing.engines as object | undefined),
         node: options.nodeEngines ?? defaults.nodeEngines,
@@ -88,8 +89,7 @@ export const blockRootPackageJson = rootBase.createBlock({
 });
 
 /**
- * Applies CTM's scripts over existing ones. An existing script that runs the same
- * command through `pnpm`, like `pnpm tsc -b` for `tsc -b`, is kept as it is.
+ * Adds CTM's scripts that the repository doesn't have yet.
  */
 function mergeScripts(
   existing: Record<string, string> | undefined,
@@ -97,11 +97,29 @@ function mergeScripts(
 ): Record<string, string> {
   const merged = { ...existing };
 
+  // Scripts the repository already has are its own, such as builds with extra flags.
   for (const [name, command] of Object.entries(ours ?? {})) {
-    if (merged[name] !== `pnpm ${command}`) {
-      merged[name] = command;
-    }
+    merged[name] ??= command;
   }
 
   return merged;
+}
+
+/**
+ * Gets the packageManager value. An existing pnpm at least as new as the one asked for is
+ * kept exactly, including any integrity hash.
+ */
+function getPackageManager(existing: unknown, version: string) {
+  if (typeof existing === 'string' && existing.startsWith('pnpm@')) {
+    const existingVersion = existing.slice('pnpm@'.length).split('+')[0] ?? '';
+    if (
+      semver.valid(existingVersion) &&
+      semver.valid(version) &&
+      semver.gte(existingVersion, version)
+    ) {
+      return existing;
+    }
+  }
+
+  return `pnpm@${version}`;
 }

@@ -14,7 +14,18 @@ export function formatJson(value: unknown, existingText?: string): string {
     return editJsonc(existingText, value);
   }
 
-  return `${printValue(value, { layout: readJsonLayout(existingText), style: 'json' })}\n`;
+  return `${printValue(value, {
+    indentUnit: detectIndent(existingText),
+    layout: readJsonLayout(existingText),
+    style: 'json',
+  })}\n`;
+}
+
+/**
+ * Detects an existing file's indentation, such as tabs, defaulting to two spaces.
+ */
+function detectIndent(text: string | undefined) {
+  return /^([ \t]+)\S/m.exec(text ?? '')?.[1] ?? '  ';
 }
 
 /**
@@ -83,7 +94,9 @@ function isStrictJson(text: string) {
  * Stringifies a package.json, sorted the way eslint-plugin-package-json expects.
  */
 export function formatPackageJson(value: Record<string, unknown>, existingText?: string): string {
-  return formatJson(sortPackageJson(removeUndefined(value)), existingText);
+  // Only new manifests are sorted: an existing one keeps its key order.
+  const cleaned = removeUndefined(value);
+  return formatJson(existingText === undefined ? sortPackageJson(cleaned) : cleaned, existingText);
 }
 
 /**

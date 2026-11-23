@@ -72,6 +72,7 @@ export function readLayout(source: string, node: AstNode): Layout {
 }
 
 export interface PrintSettings {
+  indentUnit?: string;
   layout?: Layout;
   style: 'json' | 'ts';
 }
@@ -148,7 +149,7 @@ function print(
     return inlineText;
   }
 
-  const inner = `${indent}  `;
+  const inner = `${indent}${settings.indentUnit ?? '  '}`;
   const lines = entries.map(
     ([key, item], index) =>
       `${inner}${printEntry(key, item, inner, 0)}${

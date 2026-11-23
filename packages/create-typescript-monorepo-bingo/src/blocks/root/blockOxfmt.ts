@@ -20,7 +20,7 @@ import { blockVSCode } from './blockVSCode.ts';
 const baseIgnorePatterns = ['.all-contributorsrc', '**/CHANGELOG.md', 'coverage', 'pnpm-lock.yaml'];
 
 /**
- * Owns `oxfmt.config.ts` and the Format-phase script that formats every file CTM writes.
+ * Owns \`oxfmt.config.ts\`, unless the repository uses Prettier.
  * Settings and ignore patterns in an existing config are kept.
  */
 export const blockOxfmt = rootBase.createBlock({
@@ -41,6 +41,10 @@ export const blockOxfmt = rootBase.createBlock({
     ignorePatterns: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
+    if (options.formatter === 'prettier') {
+      return {};
+    }
+
     const existing = readConfigObject(props.existing) ?? {};
     // A config CTM can't read back statically, or with comments, is the repository's own:
     // CTM leaves it as it is rather than lose what it can't represent.
@@ -101,11 +105,5 @@ export default config;
 `,
       },
     });
-  },
-  setup() {
-    return { scripts: [{ commands: ['pnpm format'], phase: 1 }] };
-  },
-  transition() {
-    return { scripts: [{ commands: ['pnpm format'], phase: 1 }] };
   },
 });

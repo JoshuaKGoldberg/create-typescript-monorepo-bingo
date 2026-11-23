@@ -1,3 +1,4 @@
+import semver from 'semver';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
@@ -50,16 +51,18 @@ export function getNodeVersionsMatrix(nodeEngines: string): (number | string)[] 
   const versions: (number | string)[] = [];
 
   for (const part of nodeEngines.split('||')) {
-    const match = /(\d+)\.\d+\.\d+/.exec(part);
-    if (!match) {
-      continue;
+    const exact = /\d+\.\d+\.\d+/.exec(part)?.[0];
+    const minimum = safeMinVersion(part);
+    if (exact) {
+      versions.push(exact);
     }
-
-    const [exact, major] = match;
-    versions.push(exact, Number(major));
+    if (minimum) {
+      versions.push(minimum.major);
+    }
   }
 
-  return [...new Set(versions)];
+  // GitHub Actions rejects an empty matrix.
+  return versions.length ? [...new Set(versions)] : [Number(defaults.node.split('.')[0])];
 }
 
 /**
@@ -143,4 +146,12 @@ function createJob(job: CIJob) {
     ...(job.strategy && { strategy: job.strategy }),
     steps: [createSetupStep(job.setup), ...job.steps],
   };
+}
+
+function safeMinVersion(range: string) {
+  try {
+    return semver.minVersion(range.trim().replace(/^v/, '')) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }

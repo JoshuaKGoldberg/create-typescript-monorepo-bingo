@@ -393,4 +393,120 @@ export default config;
     expect(getFile(creation.files, '.github/renovate.json')).toBeUndefined();
     expect(creation.suggestions).toContainEqual(expect.stringContaining('eslint.config.mjs'));
   });
+
+  it('keeps scripts and dependency versions the repository has', () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    manifest.scripts.build = 'tsdown --filter=!website';
+    manifest.devDependencies.eslint = '9.0.0';
+    setFile(files, 'package.json', JSON.stringify(manifest, null, '\t'));
+
+    const output = getFile(transition(files).files, 'package.json') ?? '';
+
+    expect(output).toContain('"build": "tsdown --filter=!website"');
+    expect(output).toContain('"eslint": "9.0.0"');
+    expect(output).toContain('\t"name"');
+  });
+
+  it('merges an existing nx.json without dropping its settings', () => {
+    const files = createRepository({ taskRunner: 'nx' });
+    setFile(
+      files,
+      'nx.json',
+      JSON.stringify({ nxCloudId: 'abc', targetDefaults: { build: { cache: false } } }, null, 2),
+    );
+
+    const nx = JSON.parse(getFile(transition(files).files, 'nx.json') ?? '{}') as {
+      nxCloudId: string;
+      targetDefaults: { build: { cache: boolean; dependsOn: string[] } };
+    };
+
+    expect(nx.nxCloudId).toBe('abc');
+    expect(nx.targetDefaults.build.cache).toBe(false);
+    expect(nx.targetDefaults.build.dependsOn).toEqual(['^build']);
+  });
+
+  it('refuses a repository whose root is a published package', () => {
+    const files = createRepository();
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as Record<string, unknown>;
+    delete manifest.private;
+    manifest.main = './lib/index.js';
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+
+    expect(() => transition(files)).toThrow(/root package.json is a published package/);
+  });
+
+  it('keeps Prettier and other Git hook tools a repository uses', () => {
+    const files = createRepository();
+    delete (files as Record<string, unknown>)['oxfmt.config.ts'];
+    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+    };
+    // A repository that never had CTM's formatter or hooks.
+    for (const name of ['oxfmt', 'lint-staged', 'simple-git-hooks']) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete manifest.devDependencies[name];
+    }
+    manifest.devDependencies.prettier = '3.6.0';
+    manifest.devDependencies.husky = '9.1.7';
+    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
+    setFile(files, '.prettierrc.json', '{ "useTabs": true }\n');
+
+    const creation = transition(files);
+
+    expect(getFile(creation.files, 'oxfmt.config.ts')).toBeUndefined();
+    const output = JSON.parse(getFile(creation.files, 'package.json') ?? '{}') as {
+      devDependencies: Record<string, string>;
+    };
+    expect(output.devDependencies).not.toHaveProperty('oxfmt');
+    expect(output.devDependencies).not.toHaveProperty('lint-staged');
+    expect(JSON.stringify(creation.scripts)).toContain('prettier --ignore-unknown --write');
+  });
+
+  it('leaves owned files without the marker alone', () => {
+    const files = createRepository();
+    setFile(files, 'vitest.config.ts', 'export default { test: { testTimeout: 1 } };\n');
+
+    const creation = transition(files);
+
+    expect(getFile(creation.files, 'vitest.config.ts')).toBeUndefined();
+    expect(creation.suggestions).toContainEqual(expect.stringContaining('vitest.config.ts'));
+  });
+
+  it("doesn't duplicate docs that exist under another case or location", () => {
+    const files = createRepository();
+    const github = files['.github'] as IntakeDirectory;
+    delete github['PULL_REQUEST_TEMPLATE.md'];
+    delete github['CONTRIBUTING.md'];
+    delete github.ISSUE_TEMPLATE;
+    delete (files as Record<string, unknown>)['LICENSE.md'];
+    setFile(files, '.github/pull_request_template.md', 'Ours.\n');
+    setFile(files, 'CONTRIBUTING.md', 'Ours.\n');
+    setFile(files, '.github/ISSUE_TEMPLATE/bug.yml', 'name: Bug\n');
+    setFile(files, 'LICENSE', 'Ours.\n');
+
+    const output = transition(files).files;
+
+    expect(getFile(output, '.github/PULL_REQUEST_TEMPLATE.md')).toBeUndefined();
+    expect(getFile(output, '.github/CONTRIBUTING.md')).toBeUndefined();
+    expect(getFile(output, '.github/ISSUE_TEMPLATE/01-bug.yaml')).toBeUndefined();
+    expect(getFile(output, 'LICENSE.md')).toBeUndefined();
+  });
+
+  it('adds a workspace glob for a new build package that no glob covers', () => {
+    const files = createRepository();
+    delete (files.packages as IntakeDirectory).build;
+    setFile(files, 'pnpm-workspace.yaml', "packages:\n  - 'packages/example'\n");
+
+    expect(getFile(transition(files).files, 'pnpm-workspace.yaml')).toContain('packages/build');
+  });
+
+  it('writes a Node.js matrix for engines without full versions', () => {
+    const files = createRepository({ nodeEngines: '>=22' });
+
+    expect(getFile(files, '.github/workflows/ci.yaml')).toMatch(/node-version:\n\s+- 22\n/);
+  });
 });

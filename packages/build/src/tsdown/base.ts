@@ -1,3 +1,4 @@
+// Managed by create-typescript-monorepo-bingo: changes here are replaced on transitions.
 import type { UserConfig } from 'tsdown';
 
 export const base: UserConfig = {

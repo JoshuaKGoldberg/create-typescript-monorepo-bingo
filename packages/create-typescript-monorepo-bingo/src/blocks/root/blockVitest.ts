@@ -3,7 +3,14 @@ import { z } from 'zod';
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
 import { action } from '../../utils/actions.ts';
-import { findAlternateConfig, withoutAlternate } from '../../utils/files.ts';
+import {
+  describeUnownedFile,
+  findAlternateConfig,
+  isOwnedFile,
+  ownedFileMarker,
+  readText,
+  withoutAlternate,
+} from '../../utils/files.ts';
 import { getPackageParents, usesTaskRunner } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import { blockGitHubActionsCI, getNodeVersionsMatrix } from './blockGitHubActionsCI.ts';
@@ -21,10 +28,15 @@ export const blockVitest = rootBase.createBlock({
   },
   intake({ files }) {
     const alternate = findAlternateConfig(files, 'vitest');
-    return alternate ? { alternate } : undefined;
+    const existing = readText(files, 'vitest.config.ts');
+    return {
+      ...(alternate && { alternate }),
+      ...(!isOwnedFile(existing) && { unowned: true }),
+    };
   },
   props: {
     alternate: z.string().optional(),
+    unowned: z.boolean().optional(),
     coverageExclude: z.array(z.string()).optional(),
   },
   produce({ options, props }) {
@@ -33,6 +45,7 @@ export const blockVitest = rootBase.createBlock({
       .join(', ');
 
     return withoutAlternate(props.alternate, 'vitest.config.ts', {
+      suggestions: props.unowned ? [describeUnownedFile('vitest.config.ts')] : [],
       extensions: [
         blockGitHubActionsCI({
           jobs: [
@@ -106,7 +119,9 @@ export const blockVitest = rootBase.createBlock({
         }),
       ],
       files: {
-        'vitest.config.ts': createVitestConfig(getPackageParents(options), coverageExclude),
+        ...(!props.unowned && {
+          'vitest.config.ts': createVitestConfig(getPackageParents(options), coverageExclude),
+        }),
       },
     });
   },
@@ -136,7 +151,8 @@ ${indent}}))`;
       ${project('parent', '        ')},
     )`;
 
-  return `import { readdirSync } from 'node:fs';
+  return `${ownedFileMarker}
+import { readdirSync } from 'node:fs';
 import path from 'node:path';
 
 import { defaultExclude, defineConfig, type ViteUserConfigExport } from 'vitest/config';

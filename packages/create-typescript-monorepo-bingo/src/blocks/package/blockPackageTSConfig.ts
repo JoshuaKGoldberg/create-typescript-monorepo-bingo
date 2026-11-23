@@ -33,6 +33,14 @@ export const blockPackageTSConfig = packageBase.createBlock({
     const { package: pkg } = options;
     const existing = parseJsonText(props.existing) as TSConfig & Record<string, unknown>;
 
+    // A solution-style tsconfig, with no files of its own, is the package's own layout.
+    if (
+      (Array.isArray(existing.include) && !existing.include.length) ||
+      (Array.isArray(existing.files) && !existing.files.length)
+    ) {
+      return {};
+    }
+
     const libraries = new Map(
       (options.packages ?? [])
         .filter((other) => other.kind === 'library')
@@ -45,9 +53,13 @@ export const blockPackageTSConfig = packageBase.createBlock({
 
     // Existing references keep their order; newly needed ones are appended.
     const existingPaths = (existing.references ?? []).map((reference) => reference.path);
+    // A reference to ../x/tsconfig.src.json already covers ../x.
+    const covered = new Set(
+      existingPaths.map((path) => path.replace(/\/tsconfig[^/]*\.json$/, '')),
+    );
     const references = mergeList(
       existingPaths.length ? existingPaths : undefined,
-      computed,
+      computed.filter((path) => !covered.has(path)),
       () => 0,
     );
 

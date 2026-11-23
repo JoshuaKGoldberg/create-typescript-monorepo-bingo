@@ -2,11 +2,15 @@ import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
-import { findAlternateConfig, readText, withoutAlternate } from '../../utils/files.ts';
+import { findAlternateConfig, getEntry, readText, withoutAlternate } from '../../utils/files.ts';
 import { mergeList } from '../../utils/lists.ts';
 import { getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
-import { readESLintExtras, readESLintIgnoresWithSource } from '../../utils/staticConfig.ts';
+import {
+  isParseable,
+  readESLintExtras,
+  readESLintIgnoresWithSource,
+} from '../../utils/staticConfig.ts';
 import { blockGitHubActionsCI, type WorkflowStep } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 import { blockVSCode } from './blockVSCode.ts';
@@ -25,28 +29,41 @@ export const blockESLint = rootBase.createBlock({
   },
   intake({ files, options }) {
     const alternate = findAlternateConfig(files, 'eslint');
-    const fromFiles = ((): object | undefined => {
-      const existing = readText(files, 'eslint.config.ts');
-      const existingIgnores = readESLintIgnoresWithSource(existing);
-      const extras = readESLintExtras(
-        existing,
-        createESLintConfig([], options.workflowExtension ?? defaults.workflowExtension),
-      );
-      return {
-        ...(existingIgnores && { existingIgnores }),
-        ...(extras && { extras }),
-      };
-    })();
-    return alternate ? { ...fromFiles, alternate } : fromFiles;
+    const existing = readText(files, 'eslint.config.ts');
+    // ESLint 10 can't read legacy configs, so they're replaced, with a suggestion to delete.
+    const legacy = [
+      '.eslintrc',
+      '.eslintrc.cjs',
+      '.eslintrc.js',
+      '.eslintrc.json',
+      '.eslintrc.yaml',
+      '.eslintrc.yml',
+    ].find((name) => getEntry(files, name) !== undefined);
+    const existingIgnores = readESLintIgnoresWithSource(existing);
+    const extras = readESLintExtras(
+      existing,
+      createESLintConfig([], options.workflowExtension ?? defaults.workflowExtension),
+    );
+    return {
+      ...(alternate && { alternate }),
+      ...(existingIgnores && { existingIgnores }),
+      ...(extras && { extras }),
+      ...(existing !== undefined && !isParseable(existing) && { unparseable: true }),
+      ...(legacy && { legacy }),
+    };
   },
   props: {
     alternate: z.string().optional(),
+    legacy: z.string().optional(),
+    unparseable: z.boolean().optional(),
     extras: z
       .object({
         configs: z.array(z.string()),
         header: z.array(z.string()),
         imports: z.array(z.string()),
+        replacedImports: z.array(z.string()),
         statements: z.array(z.string()),
+        trailing: z.array(z.string()),
       })
       .optional(),
     existingIgnores: z
@@ -76,6 +93,18 @@ export const blockESLint = rootBase.createBlock({
     const prebuildSteps: WorkflowStep[] = (props.lintPrebuildSteps ?? []).map((run) => ({ run }));
 
     return withoutAlternate(props.alternate, 'eslint.config.ts', {
+      suggestions: [
+        ...(props.unparseable
+          ? [
+              "eslint.config.ts couldn't be parsed, so it wasn't updated. Fix its syntax and re-run.",
+            ]
+          : []),
+        ...(props.legacy
+          ? [
+              `ESLint 10 doesn't read ${props.legacy}: move its settings into eslint.config.ts, then delete it.`,
+            ]
+          : []),
+      ],
       extensions: [
         blockGitHubActionsCI({
           jobs: [
@@ -121,14 +150,42 @@ export const blockESLint = rootBase.createBlock({
         }),
       ],
       files: {
-        'eslint.config.ts': createESLintConfig(ignoreLines, workflowExtension, props.extras),
+        // A config that doesn't parse is left as it is, rather than lose what can't be read.
+        ...(!props.unparseable && {
+          'eslint.config.ts': createESLintConfig(ignoreLines, workflowExtension, props.extras),
+        }),
       },
     });
   },
 });
 
+const ownImports = [
+  [
+    '@eslint-community/eslint-plugin-eslint-comments/configs',
+    "import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';",
+  ],
+  ['@eslint/js', "import js from '@eslint/js';"],
+  ['@eslint/markdown', "import markdown from '@eslint/markdown';"],
+  ['@vitest/eslint-plugin', "import vitest from '@vitest/eslint-plugin';"],
+  ['eslint-plugin-jsdoc', "import jsdoc from 'eslint-plugin-jsdoc';"],
+  ['eslint-plugin-jsonc', "import jsonc from 'eslint-plugin-jsonc';"],
+  ['eslint-plugin-package-json', "import packageJson from 'eslint-plugin-package-json';"],
+  ['eslint-plugin-perfectionist', "import perfectionist from 'eslint-plugin-perfectionist';"],
+  ['eslint-plugin-regexp', "import * as regexp from 'eslint-plugin-regexp';"],
+  ['eslint-plugin-yml', "import yml from 'eslint-plugin-yml';"],
+  ['eslint/config', "import { defineConfig } from 'eslint/config';"],
+  ['typescript-eslint', "import tseslint from 'typescript-eslint';"],
+] as const;
+
 function withTrailingComma(line: string) {
-  return line.startsWith('//') || line.startsWith('/*') || line.endsWith(',') ? line : `${line},`;
+  if (line.startsWith('//') || line.startsWith('/*')) {
+    return line;
+  }
+
+  // A comment after an entry, like \`'generated', // generated code\`, keeps the comma before it.
+  const match = /^(.*?['"\]}])(\s*(?:\/\/|\/\*).*)?$/.exec(line);
+  const [, code = line, comment = ''] = match ?? [];
+  return code.endsWith(',') ? line : `${code},${comment}`;
 }
 
 /**
@@ -138,21 +195,22 @@ function withTrailingComma(line: string) {
 function createESLintConfig(
   ignoreLines: string[],
   workflowExtension: string,
-  extras?: { configs: string[]; header: string[]; imports: string[]; statements: string[] },
+  extras?: {
+    configs: string[];
+    header: string[];
+    imports: string[];
+    replacedImports: string[];
+    statements: string[];
+    trailing: string[];
+  },
 ) {
-  return `${extras?.header.length ? `${extras.header.join('\n')}\n\n` : ''}import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
-import js from '@eslint/js';
-import markdown from '@eslint/markdown';
-import vitest from '@vitest/eslint-plugin';
-import jsdoc from 'eslint-plugin-jsdoc';
-import jsonc from 'eslint-plugin-jsonc';
-import packageJson from 'eslint-plugin-package-json';
-import perfectionist from 'eslint-plugin-perfectionist';
-import * as regexp from 'eslint-plugin-regexp';
-import yml from 'eslint-plugin-yml';
-import { defineConfig } from 'eslint/config';
-import tseslint from 'typescript-eslint';
-${extras?.imports.length ? `${extras.imports.join('\n')}\n` : ''}${extras?.statements.length ? `\n${extras.statements.join('\n\n')}\n` : ''}
+  const replaced = new Set(extras?.replacedImports);
+  return `${extras?.header.length ? `${extras.header.join('\n')}\n\n` : ''}${ownImports
+    .filter(([module]) => !replaced.has(module))
+    .map(([, line]) => `${line}\n`)
+    .join(
+      '',
+    )}${extras?.imports.length ? `${extras.imports.join('\n')}\n` : ''}${extras?.statements.length ? `\n${extras.statements.join('\n\n')}\n` : ''}
 export default defineConfig(
   {
     ignores: [
@@ -254,7 +312,7 @@ ${ignoreLines.join('\n')}
       'yml/file-extension': 'off',
       'yml/sort-keys': ['error', { order: { type: 'asc' }, pathPattern: '^.*$' }],
     },
-  },${extras?.configs.length ? `\n${extras.configs.map((config) => `  ${config},`).join('\n')}` : ''}
+  },${extras?.configs.length ? `\n${extras.configs.map((config) => `  ${config},`).join('\n')}` : ''}${extras?.trailing.length ? `\n  ${extras.trailing.join('\n  ')}` : ''}
 );
 `;
 }

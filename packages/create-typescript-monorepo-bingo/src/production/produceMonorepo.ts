@@ -1,10 +1,13 @@
 import { type Creation, mergeCreations, type ProductionMode } from 'bingo';
 import type { CreatedDirectory, IntakeDirectory } from 'bingo-fs';
 import { type BlockCreation, producePreset } from 'bingo-stratum';
+import semver from 'semver';
+import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 
 import { rootBase } from '../bases/rootBase.ts';
 import {
+  defaults,
   type PackageOptions,
   type PackageSpec,
   type RootOptions,
@@ -16,7 +19,7 @@ import {
   type PackageManifest,
 } from '../prepare/prepareRoot.ts';
 import { packageBlocks, packagePreset, rootPreset } from '../presets.ts';
-import { getDirectory, readJson } from '../utils/files.ts';
+import { getDirectory, readJson, readText } from '../utils/files.ts';
 import { getLibraryPackages, getPackageParents, sortByDependencies } from '../utils/options.ts';
 import { asRootExtension } from './asRootExtension.ts';
 
@@ -39,26 +42,36 @@ export interface ProduceMonorepoSettings {
 export function produceMonorepo(settings: ProduceMonorepoSettings): Partial<Creation> {
   const options = normalizeOptions(settings.options);
 
-  // A new repository has no manifests to find shared dependencies in, so they come
-  // from a first production of the manifests CTM is about to write.
-  if (options.catalogs === 'default' && options.catalogShared === undefined) {
-    const draft = produceMonorepoOnce({ ...settings, options: { ...options, catalogShared: [] } });
+  // Shared dependencies are found in the manifests CTM is about to write, through a draft
+  // production: a new repository has none on disk, and a transition may add some, such as
+  // a new build package's.
+  if (options.catalogs === 'default') {
+    const prepared = options.catalogShared ?? [];
+    const draft = produceMonorepoOnce({
+      ...settings,
+      options: { ...options, catalogShared: prepared },
+    });
     const draftFiles = toIntake(draft.files ?? {});
     const manifests = findWorkspacePackages(
       draftFiles,
       getPackageParents(options).map((parent) => `${parent}/*`),
     ).map((pkg) => ({ kind: 'library' as const, manifest: pkg.manifest }));
     const root = readJson(draftFiles, 'package.json');
+    const workspace = parseYaml(readText(draftFiles, 'pnpm-workspace.yaml') ?? '{}') as
+      | undefined
+      | { catalog?: Record<string, string>; catalogs?: { default?: Record<string, string> } };
+
+    const shared = findSharedDependencies(
+      [
+        ...(root ? [{ kind: 'root' as const, manifest: root as PackageManifest }] : []),
+        ...manifests,
+      ],
+      { ...workspace?.catalog, ...workspace?.catalogs?.default },
+    );
 
     return produceMonorepoOnce({
       ...settings,
-      options: {
-        ...options,
-        catalogShared: findSharedDependencies([
-          ...(root ? [{ kind: 'root' as const, manifest: root as PackageManifest }] : []),
-          ...manifests,
-        ]),
-      },
+      options: { ...options, catalogShared: [...new Set([...prepared, ...shared])].sort() },
     });
   }
 
@@ -97,7 +110,7 @@ function produceMonorepoOnce({
     }),
   );
 
-  const root = producePreset(
+  const rootProduction = producePreset(
     rootBase.createPreset({
       about: rootPreset.about,
       blocks: [...rootPreset.blocks, ...carriers],
@@ -105,13 +118,16 @@ function produceMonorepoOnce({
     { files, mode, offline, options: { ...options, preset: 'root' } as RootOptions },
   );
 
-  return withoutExtensions(
-    perPackage.reduce(
-      (all, { creation, pkg }) =>
-        mergeCreations(all, { files: nestFiles(pkg.directory, creation.files) }),
-      withoutExtensions(root) as Creation,
-    ),
+  const creation = perPackage.reduce(
+    (all, { creation: packageCreation, pkg }) =>
+      mergeCreations(all, { files: nestFiles(pkg.directory, packageCreation.files) }),
+    withoutExtensions(rootProduction) as Creation,
   );
+
+  return {
+    ...creation,
+    scripts: [...creation.scripts, ...createFormatScripts(options, creation)],
+  };
 }
 
 /**
@@ -127,6 +143,10 @@ export function normalizeOptions(options: RootOptions): RootOptions {
         .map((issue) => `--${issue.path.join('.')}: ${issue.message}`)
         .join('; ')}`,
     );
+  }
+
+  if (options.pnpm !== undefined && !semver.valid(options.pnpm)) {
+    throw new Error(`--pnpm must be a full version, like ${defaults.pnpm}, not '${options.pnpm}'.`);
   }
 
   const packages: PackageSpec[] = [...(options.packages ?? [])];
@@ -213,4 +233,34 @@ function withoutExtensions<Options extends object>(
   const rest = { ...creation };
   delete rest.extensions;
   return rest;
+}
+
+/**
+ * Formats the files CTM wrote, and only those, with the repository's formatter.
+ */
+function createFormatScripts(options: RootOptions, creation: Partial<Creation>) {
+  const files = listFiles(creation.files ?? {});
+  if (!files.length) {
+    return [];
+  }
+
+  const formatter =
+    options.formatter === 'prettier'
+      ? 'prettier --ignore-unknown --write'
+      : 'oxfmt --no-error-on-unmatched-pattern';
+  const quoted = files.map((file) => `'${file.replaceAll("'", "'\\''")}'`).join(' ');
+
+  return [{ commands: [`pnpm exec ${formatter} ${quoted}`], phase: 1 }];
+}
+
+function listFiles(directory: CreatedDirectory, prefix = ''): string[] {
+  return Object.entries(directory).flatMap(([name, entry]) => {
+    if (!entry) {
+      return [];
+    }
+
+    return typeof entry === 'string' || Array.isArray(entry)
+      ? [`${prefix}${name}`]
+      : listFiles(entry, `${prefix}${name}/`);
+  });
 }

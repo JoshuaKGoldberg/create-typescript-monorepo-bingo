@@ -52,7 +52,10 @@ export const blockVSCode = rootBase.createBlock({
     return {
       files: {
         '.vscode': {
-          'extensions.json': formatJson({ recommendations: extensions }, texts.extensions),
+          'extensions.json': formatJson(
+            { ...parseJsonText(texts.extensions), recommendations: extensions },
+            texts.extensions,
+          ),
           ...(launch && { 'launch.json': formatJson(launch, texts.launch) }),
           'settings.json': formatJson(settings, texts.settings),
           'tasks.json': formatJson(

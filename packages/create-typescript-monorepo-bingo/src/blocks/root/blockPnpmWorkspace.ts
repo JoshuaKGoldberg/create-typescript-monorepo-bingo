@@ -45,7 +45,10 @@ export const blockPnpmWorkspace = rootBase.createBlock({
     const existingGlobs = readStrings(document.get('packages'));
     const globs = mergeList(existingGlobs.length ? existingGlobs : undefined, [
       ...(existingGlobs.length ? [] : ['packages/*']),
-      ...(props.packages ?? []),
+      // Package directories that no existing glob covers, like a new packages/build.
+      ...(props.packages ?? []).filter(
+        (directory) => !existingGlobs.some((glob) => globCovers(glob, directory)),
+      ),
     ]);
     if (globs.length !== existingGlobs.length) {
       document.set('packages', document.createNode(globs));
@@ -251,4 +254,21 @@ function keyText(key: unknown) {
 
 function compareKeys(a: string, b: string) {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function globCovers(glob: string, directory: string) {
+  const normalized = glob.replace(/^\.\//, '').replace(/\/$/, '');
+  if (normalized === directory) {
+    return true;
+  }
+
+  if (normalized.endsWith('/**')) {
+    return directory.startsWith(normalized.slice(0, -2));
+  }
+
+  return (
+    normalized.endsWith('/*') &&
+    directory.startsWith(normalized.slice(0, -1)) &&
+    !directory.slice(normalized.length - 1).includes('/')
+  );
 }

@@ -75,16 +75,22 @@ describe(resolveSpecifier, () => {
     );
   });
 
-  it('upgrades an older alias range', () => {
+  it('leaves upgrading an older alias range to Renovate', () => {
     expect(resolveSpecifier('npm:typescript@7.0.1', 'npm:typescript@7.0.2')).toBe(
+      'npm:typescript@7.0.1',
+    );
+  });
+
+  it('switches alias targets from the same major version', () => {
+    expect(resolveSpecifier('npm:other@7.0.0', 'npm:typescript@7.0.2')).toBe(
       'npm:typescript@7.0.2',
     );
   });
 
-  it('uses ours when an alias points at a different package', () => {
-    expect(resolveSpecifier('npm:other@6.0.0', 'npm:typescript@7.0.2')).toBe(
-      'npm:typescript@7.0.2',
-    );
+  it("doesn't switch alias targets from a compatibility range", () => {
+    expect(
+      resolveSpecifier('>=4.8.4 <6.1.0', 'npm:@typescript/typescript6@6.0.2', 'typescript'),
+    ).toBe('>=4.8.4 <6.1.0');
   });
 
   it('keeps a newer major version rather than switching to an older alias target', () => {
@@ -105,8 +111,8 @@ describe(resolveSpecifier, () => {
     expect(resolveSpecifier('5.2.0', '5.1.1')).toBe('5.2.0');
   });
 
-  it('upgrades a smaller plain version', () => {
-    expect(resolveSpecifier('5.0.0', '5.1.1')).toBe('5.1.1');
+  it('leaves upgrading a smaller plain version to Renovate', () => {
+    expect(resolveSpecifier('5.0.0', '5.1.1')).toBe('5.0.0');
   });
 
   it('keeps an equal version with a different style', () => {

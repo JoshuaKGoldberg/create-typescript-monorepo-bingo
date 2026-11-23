@@ -1,4 +1,7 @@
+import { z } from 'zod';
+
 import { rootBase } from '../../bases/rootBase.ts';
+import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatJson } from '../../utils/json.ts';
 import { getPackageParents } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
@@ -49,7 +52,14 @@ export const blockTurborepo = rootBase.createBlock({
   about: {
     name: 'Turborepo',
   },
-  produce({ options }) {
+  intake({ files }) {
+    const existingTurbo = readText(files, 'turbo.json');
+    return existingTurbo === undefined ? undefined : { existingTurbo };
+  },
+  props: {
+    existingTurbo: z.string().optional(),
+  },
+  produce({ options, props }) {
     if (options.taskRunner !== 'turbo') {
       return {};
     }
@@ -66,22 +76,28 @@ export const blockTurborepo = rootBase.createBlock({
         }),
       ],
       files: {
-        'turbo.json': formatJson({
-          $schema: 'https://turborepo.com/schema.json',
-          tasks: {
-            build: {
-              dependsOn: ['^build'],
-              // The build package's configs aren't a build dependency turbo can see.
-              inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/packages/build/**'],
-              outputs: ['dist/**', 'lib/**', 'node_modules/.cache/tsbuild/**'],
+        'turbo.json': formatJson(
+          withExisting(props.existingTurbo, {
+            $schema: 'https://turborepo.com/schema.json',
+            tasks: {
+              build: {
+                dependsOn: ['^build'],
+                // The build package's configs aren't a build dependency turbo can see.
+                inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/packages/build/**'],
+                outputs: ['dist/**', 'lib/**', 'node_modules/.cache/tsbuild/**'],
+              },
+              test: {
+                // Each package's tests run with the root Vitest config.
+                inputs: [
+                  '$TURBO_DEFAULT$',
+                  `$TURBO_ROOT$/${options.vitestConfig ?? 'vitest.config.ts'}`,
+                ],
+                outputs: [],
+              },
             },
-            test: {
-              // Each package's tests run with the root Vitest config.
-              inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/vitest.config.ts'],
-              outputs: [],
-            },
-          },
-        }),
+          }),
+          props.existingTurbo,
+        ),
       },
     };
   },
@@ -95,7 +111,14 @@ export const blockNx = rootBase.createBlock({
   about: {
     name: 'Nx',
   },
-  produce({ options }) {
+  intake({ files }) {
+    const existingNx = readText(files, 'nx.json');
+    return existingNx === undefined ? undefined : { existingNx };
+  },
+  props: {
+    existingNx: z.string().optional(),
+  },
+  produce({ options, props }) {
     if (options.taskRunner !== 'nx') {
       return {};
     }
@@ -115,26 +138,58 @@ export const blockNx = rootBase.createBlock({
         }),
       ],
       files: {
-        'nx.json': formatJson({
-          $schema: './node_modules/nx/schemas/nx-schema.json',
-          namedInputs: {
-            default: ['{projectRoot}/**/*'],
-            production: ['default', '!{projectRoot}/**/*.test.ts'],
-          },
-          targetDefaults: {
-            build: {
-              cache: true,
-              dependsOn: ['^build'],
-              inputs: ['production', '^production', '{workspaceRoot}/packages/build/**/*'],
-              outputs: ['{projectRoot}/dist', '{projectRoot}/lib'],
+        'nx.json': formatJson(
+          withExisting(props.existingNx, {
+            $schema: './node_modules/nx/schemas/nx-schema.json',
+            namedInputs: {
+              default: ['{projectRoot}/**/*'],
+              production: ['default', '!{projectRoot}/**/*.test.ts'],
             },
-            test: {
-              cache: true,
-              inputs: ['default', '^production', '{workspaceRoot}/vitest.config.ts'],
+            targetDefaults: {
+              build: {
+                cache: true,
+                dependsOn: ['^build'],
+                inputs: ['production', '^production', '{workspaceRoot}/packages/build/**/*'],
+                outputs: ['{projectRoot}/dist', '{projectRoot}/lib'],
+              },
+              test: {
+                cache: true,
+                inputs: [
+                  'default',
+                  '^production',
+                  `{workspaceRoot}/${options.vitestConfig ?? 'vitest.config.ts'}`,
+                ],
+              },
             },
-          },
-        }),
+          }),
+          props.existingNx,
+        ),
       },
     };
   },
 });
+
+/**
+ * Fills in CTM's settings under an existing config, whose own values always win.
+ */
+function withExisting(existingText: string | undefined, ours: Record<string, unknown>) {
+  return deepMerge(ours, parseJsonText(existingText));
+}
+
+function deepMerge(base: Record<string, unknown>, overrides: Record<string, unknown>) {
+  const merged: Record<string, unknown> = { ...overrides };
+  for (const [key, value] of Object.entries(base)) {
+    const override = overrides[key];
+    merged[key] =
+      override === undefined
+        ? value
+        : isObject(value) && isObject(override)
+          ? deepMerge(value, override)
+          : override;
+  }
+  return merged;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}

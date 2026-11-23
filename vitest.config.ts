@@ -1,3 +1,4 @@
+// Managed by create-typescript-monorepo-bingo: changes here are replaced on transitions.
 import { readdirSync } from 'node:fs';
 import path from 'node:path';
 

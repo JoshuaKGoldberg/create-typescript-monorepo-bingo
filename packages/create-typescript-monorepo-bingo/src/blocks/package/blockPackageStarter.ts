@@ -12,9 +12,11 @@ export const blockPackageStarter = packageBase.createBlock({
     name: 'Package Starter',
   },
   intake({ files }) {
+    // Only new packages get starter files: an existing one's are its own.
+    const isExisting = getEntry(files, 'package.json') !== undefined;
     return {
-      hasReadme: getEntry(files, 'README.md') !== undefined,
-      hasSource: getEntry(files, 'src') !== undefined,
+      hasReadme: isExisting || getEntry(files, 'README.md') !== undefined,
+      hasSource: isExisting || getEntry(files, 'src') !== undefined,
     };
   },
   props: {

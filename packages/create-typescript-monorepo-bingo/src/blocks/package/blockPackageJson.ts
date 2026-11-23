@@ -76,7 +76,7 @@ export const blockPackageJson = packageBase.createBlock({
       ? {
           ...existingScripts,
           build: 'tsdown',
-          test: `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${pkg.directory.split('/').pop() ?? pkg.name}`,
+          test: `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}${options.vitestConfig ?? 'vitest.config.ts'} --project ${pkg.directory.split('/').pop() ?? pkg.name}`,
         }
       : existingScripts;
 

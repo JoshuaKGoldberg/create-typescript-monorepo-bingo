@@ -21,7 +21,7 @@ describe(resolveDependencies, () => {
       ),
     ).toEqual({
       catalogEntries: [],
-      dependencies: { other: '1.0.0', vitest: '5.1.1' },
+      dependencies: { other: '1.0.0', vitest: '5.0.0' },
     });
   });
 
