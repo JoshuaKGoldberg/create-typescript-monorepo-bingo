@@ -157,9 +157,16 @@ function syncNodeVersions(
   const items = [...kept];
   for (const version of added) {
     const target = semver.coerce(String(version));
+    // Before the first larger entry, or before its own major (like 22.22.2 before 22),
+    // matching the minimum-then-major order CTM writes.
     const index = items.findIndex((item) => {
-      const current = isScalar(item) ? semver.coerce(String(item.value)) : null;
-      return !!target && !!current && semver.gt(current, target);
+      const value = isScalar(item) ? String(item.value) : '';
+      const current = semver.coerce(value);
+      return (
+        !!target &&
+        !!current &&
+        (semver.gt(current, target) || (/^\d+$/.test(value) && current.major === target.major))
+      );
     });
     items.splice(index === -1 ? items.length : index, 0, document.createNode(version));
   }

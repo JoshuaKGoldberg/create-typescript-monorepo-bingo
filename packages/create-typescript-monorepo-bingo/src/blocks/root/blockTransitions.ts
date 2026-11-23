@@ -91,6 +91,14 @@ export const blockTransitions = rootBase.createBlock({
     };
 
     return {
+      // Without an inferred App, the defaults need setting up before releases and
+      // transitions can run.
+      suggestions:
+        options.releaseApp === undefined && props.existing === undefined
+          ? [
+              `The release and transitions workflows use a GitHub App: set the ${app}_CLIENT_ID Actions variable and the ${app}_PRIVATE_KEY secret, or re-run with --releaseApp to use another prefix.`,
+            ]
+          : [],
       files: {
         '.github': {
           workflows: {
