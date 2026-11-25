@@ -16,14 +16,20 @@ export const blockGitHubActionsSetup = rootBase.createBlock({
     const existingName = ['action.yaml', 'action.yml'].find(
       (name) => readText(files, `.github/actions/setup/${name}`) !== undefined,
     );
-    return existingName ? { existingName } : undefined;
+    return existingName
+      ? { existing: readText(files, `.github/actions/setup/${existingName}`), existingName }
+      : undefined;
   },
   props: {
+    existing: z.string().optional(),
     existingName: z.string().optional(),
   },
   produce({ options, props }) {
-    if (props.existingName) {
-      return {};
+    if (props.existing !== undefined && props.existingName) {
+      const updated = withNodeVersion(props.existing, options.node);
+      return updated === props.existing
+        ? {}
+        : { files: { '.github': { actions: { setup: { [props.existingName]: updated } } } } };
     }
 
     return {
@@ -90,3 +96,15 @@ export const blockGitHubActionsSetup = rootBase.createBlock({
     };
   },
 });
+
+/**
+ * Updates the default version in CTM's own action, rather than in a repository's own.
+ */
+function withNodeVersion(existing: string, node: string | undefined) {
+  return node && existing.includes('runtime: node@${{ inputs.node-version }}')
+    ? existing.replace(
+        /^(\s+node-version:\n(?:\s+(?:description|required): .*\n)*\s+default: )\d+(?:\.\d+){2}$/m,
+        (_, prefix: string) => `${prefix}${node}`,
+      )
+    : existing;
+}

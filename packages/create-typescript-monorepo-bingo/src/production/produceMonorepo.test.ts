@@ -197,6 +197,20 @@ describe(produceMonorepo, () => {
     }
   });
 
+  it("keeps the setup action's Node.js version in line with .nvmrc", () => {
+    const action = '.github/actions/setup/action.yaml';
+    const transition = produceMonorepo({
+      files: toIntake(setup.files ?? {}),
+      mode: 'transition',
+      options: { ...options, node: '30.1.2' },
+    });
+
+    expect(readFile(setup.files, action)).not.toContain('30.1.2');
+    expect(readFile(transition.files, action)).toBe(
+      readFile(setup.files, action).replace(/default: \d+\.\d+\.\d+/, 'default: 30.1.2'),
+    );
+  });
+
   it.each([
     ['💖', 'An example monorepo.'],
     ['🗝️', 'An example monorepo. 🗝️'],
