@@ -135,6 +135,9 @@ describe(produceMonorepo, () => {
     expect(JSON.parse(readFile(creation.files, 'packages/example/package.json'))).toMatchObject({
       keywords: ['Type Script', 'example'],
     });
+    expect(JSON.parse(readFile(creation.files, 'cspell.json'))).toMatchObject({
+      words: expect.arrayContaining(['script', 'type']) as unknown,
+    });
 
     const ruleset = find('POST /repos/{owner}/{repo}/rulesets') as {
       rules: { parameters?: { required_status_checks?: { context: string }[] } }[];
@@ -173,6 +176,7 @@ describe(produceMonorepo, () => {
         .map(({ parameters }) => parameters.name)
         .sort(),
     ).toEqual([
+      'accessibility',
       'bug',
       'documentation',
       'duplicate',
