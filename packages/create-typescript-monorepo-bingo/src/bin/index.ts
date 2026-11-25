@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { runTemplateCLI } from 'bingo';
 
-import { template } from '../template.ts';
+import { getCLITemplate } from './getCLITemplate.ts';
 
-process.exitCode = await runTemplateCLI(template);
+process.exitCode = await runTemplateCLI(await getCLITemplate(process.argv.slice(2)));

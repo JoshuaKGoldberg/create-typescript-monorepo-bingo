@@ -26,6 +26,12 @@ With `--remote`, the script will also create a public repository on GitHub with:
 - A ruleset that requires PRs and CI checks on `main`, which admins can bypass
 - Secret scanning and push protection
 
+It'll be shown on GitHub as _generated from_ this template.
+GitHub only sets that when a repository is created, so it can't be added to existing repositories.
+
+> Prefer `--remote` over GitHub's _Use this template_ button.
+> The button copies this repository's own code instead of running the template.
+
 ## Manual Setup
 
 Some tooling needs settings that `create-typescript-monorepo-bingo` can't set up for you.
