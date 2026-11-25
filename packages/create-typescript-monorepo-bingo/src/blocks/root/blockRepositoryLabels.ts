@@ -4,6 +4,12 @@ import { rootBase } from '../../bases/rootBase.ts';
 
 const labels: { color: string; description: string; name: string; replaces?: string }[] = [
   {
+    color: 'f143ab',
+    description: 'Barriers affecting people with disabilities ♿',
+    name: 'area: accessibility',
+    replaces: 'accessibility',
+  },
+  {
     color: '0075ca',
     description: 'Improvements or additions to docs 📝',
     name: 'area: documentation',

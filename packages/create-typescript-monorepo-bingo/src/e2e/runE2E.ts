@@ -231,6 +231,10 @@ const scenarios: Scenario[] = [
           'Example',
           '--description',
           'An example monorepo.',
+          '--keywords',
+          'zorbix',
+          '--keywords',
+          'example',
         ],
       },
       {

@@ -122,6 +122,7 @@ function getNameWords(options: RootOptions, isNew: boolean): string[] {
       : []),
     // Existing packages already use their scope
     isUsedScope(options) ? options.newPackage?.split('/')[1] : options.newPackage,
+    ...(options.keywords ?? []),
   ];
   // CSpell skips words shorter than four letters
   return [
