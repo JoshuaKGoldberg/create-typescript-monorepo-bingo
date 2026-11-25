@@ -100,7 +100,7 @@ jobs:
           pack-dir-artifact-id: ${{ needs.pack.outputs.pack-dir-artifact-id }}
 
   comment:
-    if: needs.publish.outputs.published == 'true'
+    if: ${{ !cancelled() && needs.publish.outputs.published == 'true' }}
     name: Comment on Released PRs and Issues
     needs: publish
     runs-on: ubuntu-latest
