@@ -4,7 +4,7 @@ import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
 import { action, createSetupSteps } from '../../utils/actions.ts';
 import { readText } from '../../utils/files.ts';
-import { getWorkflowPath } from '../../utils/options.ts';
+import { getReleaseAppCondition, getWorkflowPath } from '../../utils/options.ts';
 import { formatYamlFile } from '../../utils/yaml.ts';
 
 /**
@@ -43,7 +43,7 @@ export const blockTransitions = rootBase.createBlock({
       jobs: {
         transition: {
           name: 'Transition',
-          if: 'github.event.repository.fork != true',
+          if: getReleaseAppCondition(options),
           'runs-on': 'ubuntu-latest',
           permissions: { contents: 'read' },
           steps: [

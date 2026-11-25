@@ -2,6 +2,7 @@ import pinsPackage from '@ctm/pins/package.json' with { type: 'json' };
 import type { CreatedDirectory, IntakeDirectory } from 'bingo-fs';
 import { producePreset } from 'bingo-stratum';
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 import type { RootOptions } from '../options.ts';
 import { packagePreset, rootPreset } from '../presets.ts';
@@ -100,6 +101,22 @@ describe(produceMonorepo, () => {
     expect(transitionFiles.length).toBeGreaterThan(30);
     for (const file of transitionFiles) {
       expect(readFile(transition.files, file)).toBe(readFile(setup.files, file));
+    }
+  });
+
+  it.each(['release', 'transitions'])('skips the %s workflow without a GitHub App', (name) => {
+    const creation = produceMonorepo({
+      mode: 'setup',
+      options: { ...options, releaseApp: 'MY_APP' },
+    });
+
+    const workflow = parse(readFile(creation.files, `.github/workflows/${name}.yaml`)) as {
+      jobs: Record<string, { if?: string; needs?: string }>;
+    };
+    for (const job of Object.values(workflow.jobs)) {
+      if (!job.needs) {
+        expect(job.if).toBe("github.event.repository.fork != true && vars.MY_APP_CLIENT_ID != ''");
+      }
     }
   });
 

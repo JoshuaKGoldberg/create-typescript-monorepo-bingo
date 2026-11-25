@@ -13,7 +13,7 @@ concurrency:
 jobs:
   select_mode:
     name: Select Mode
-    if: github.event.repository.fork != true
+    if: github.event.repository.fork != true && vars.RELEASEBOT_APP_CLIENT_ID != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
