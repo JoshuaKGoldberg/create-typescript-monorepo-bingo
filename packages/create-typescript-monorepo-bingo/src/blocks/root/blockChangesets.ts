@@ -100,7 +100,7 @@ export const blockChangesets = rootBase.createBlock({
       name: 'Release',
       on: { push: { branches: ['main'] } },
       permissions: {},
-      concurrency: { group: '${{ github.workflow }}-${{ github.ref }}' },
+      concurrency: { group: '${{ github.workflow }}-${{ github.ref }}', queue: 'max' },
       jobs: {
         select_mode: {
           name: 'Select Mode',
@@ -128,7 +128,11 @@ export const blockChangesets = rootBase.createBlock({
             {
               name: 'Version Packages',
               uses: action('changesets/action', '/version'),
-              with: { 'github-token': '${{ steps.create_token.outputs.token }}' },
+              with: {
+                'commit-message': 'chore: version packages',
+                'github-token': '${{ steps.create_token.outputs.token }}',
+                'pr-title': 'chore: version packages',
+              },
             },
           ],
         },

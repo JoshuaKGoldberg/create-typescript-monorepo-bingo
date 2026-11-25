@@ -61,6 +61,17 @@ export const blockDocs = rootBase.createBlock({
 });
 
 /**
+ * Uses the emoji at the end of the description, if there is one.
+ */
+function getEmoji({ description }: RootOptions): string {
+  const last = Array.from(
+    new Intl.Segmenter().segment(description.trim()),
+    ({ segment }) => segment,
+  ).at(-1);
+  return last && /\p{Extended_Pictographic}/u.test(last) ? last : '💖';
+}
+
+/**
  * Whether a doc exists, in any letter case and any directory GitHub looks in.
  */
 function hasEquivalentDoc(files: IntakeDirectory | undefined, docPath: string) {
@@ -125,7 +136,7 @@ Please report unacceptable behavior to the project maintainers${options.email ? 
 `,
     '.github/CONTRIBUTING.md': `# Contributing
 
-Thanks for your interest in contributing to \`${options.repository}\`! 💖
+Thanks for your interest in contributing to \`${options.repository}\`! ${getEmoji(options)}
 
 ## Code of Conduct
 
@@ -273,7 +284,7 @@ Add a changeset describing your change with:
 pnpm changeset
 \`\`\`
 
-The release workflow will send a _"Version Packages"_ PR, then publish once it's merged.
+The release workflow will send a _\`chore: version packages\`_ PR, then publish once it's merged.
 `,
     '.github/ISSUE_TEMPLATE/01-bug.{yaml}': createIssueTemplate(
       '🐛 Bug',
@@ -299,7 +310,7 @@ The release workflow will send a _"Version Packages"_ PR, then publish once it's
       '🛠 Tooling: <short description of the change>',
       'area: tooling',
     ),
-    '.github/PULL_REQUEST_TEMPLATE.md': `<!-- 👋 Hi, thanks for sending a PR to ${options.repository}! 💖
+    '.github/PULL_REQUEST_TEMPLATE.md': `<!-- 👋 Hi, thanks for sending a PR to ${options.repository}! ${getEmoji(options)}
 Please fill out all fields below and make sure each item is true and [x] checked.
 Otherwise we may not be able to review your PR. -->
 

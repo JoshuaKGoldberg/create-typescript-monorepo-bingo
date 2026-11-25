@@ -81,4 +81,4 @@ Add a changeset describing your change with:
 pnpm changeset
 ```
 
-The release workflow will send a _"Version Packages"_ PR, then publish once it's merged.
+The release workflow will send a _`chore: version packages`_ PR, then publish once it's merged.
