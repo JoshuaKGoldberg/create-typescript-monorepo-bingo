@@ -197,6 +197,31 @@ describe(produceMonorepo, () => {
     }
   });
 
+  it.each([
+    ['💖', 'An example monorepo.'],
+    ['🗝️', 'An example monorepo. 🗝️'],
+    ['👩‍💻', 'An example monorepo! 👩‍💻 '],
+    ['💖', 'An example monorepo 1'],
+  ])('uses %s in docs when the description is %j', (emoji, description) => {
+    const creation = produceMonorepo({ mode: 'setup', options: { ...options, description } });
+
+    for (const file of ['.github/CONTRIBUTING.md', '.github/PULL_REQUEST_TEMPLATE.md']) {
+      expect(readFile(creation.files, file)).toContain(`! ${emoji}\n`);
+    }
+  });
+
+  it('queues releases and gives version PRs a conventional title', () => {
+    const release = parse(readFile(setup.files, '.github/workflows/release.yaml')) as {
+      concurrency: unknown;
+      jobs: { version: { steps: { with?: object }[] } };
+    };
+    expect(release.concurrency).toMatchObject({ queue: 'max' });
+    expect(release.jobs.version.steps.at(-1)?.with).toMatchObject({
+      'commit-message': 'chore: version packages',
+      'pr-title': 'chore: version packages',
+    });
+  });
+
   it.each(['release', 'transitions'])('skips the %s workflow without a GitHub App', (name) => {
     const creation = produceMonorepo({
       mode: 'setup',

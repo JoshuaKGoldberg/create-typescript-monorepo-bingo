@@ -9,6 +9,7 @@ permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
+  queue: max
 
 jobs:
   select_mode:
@@ -45,7 +46,9 @@ jobs:
       - name: Version Packages
         uses: changesets/action/version@v2.1.2
         with:
+          commit-message: 'chore: version packages'
           github-token: ${{ steps.create_token.outputs.token }}
+          pr-title: 'chore: version packages'
 
   pack:
     name: Pack
