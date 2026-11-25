@@ -7,6 +7,7 @@ import { createSetupSteps } from '../../utils/actions.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { getWorkflowPath } from '../../utils/options.ts';
 import { formatYamlFile } from '../../utils/yaml.ts';
+import { blockRepositoryRuleset } from './blockRepositoryRuleset.ts';
 
 export const workflowStepSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
@@ -115,6 +116,11 @@ export const blockGitHubActionsCI = rootBase.createBlock({
     }
 
     return {
+      extensions: [
+        blockRepositoryRuleset({
+          requiredStatusChecks: [...byId.values()].flatMap(getStatusChecks),
+        }),
+      ],
       files: {
         '.github': {
           workflows: {
@@ -157,6 +163,22 @@ function createJob(job: CIJob, options: RootOptions) {
     ...(job.strategy && { strategy: job.strategy }),
     steps: [...createSetupSteps(options, job.setup), ...job.steps],
   };
+}
+
+/**
+ * Node.js versions change over time, which would leave required checks that never run.
+ */
+function getStatusChecks(job: CIJob) {
+  const matrix = job.strategy?.matrix as Record<string, string[]> | undefined;
+  if (!matrix) {
+    return [job.name];
+  }
+
+  return 'node-version' in matrix
+    ? []
+    : Object.entries(matrix).flatMap(([key, values]) =>
+        values.map((value) => job.name.replace(`\${{ matrix.${key} }}`, value)),
+      );
 }
 
 function safeMinVersion(range: string) {

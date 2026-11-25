@@ -16,6 +16,8 @@ A `--remote` CLI flag exists as a convenience to create a remote repository on G
 npx create-typescript-monorepo-bingo --remote
 ```
 
+See [Setup > Remote Repositories](./Setup.md#remote-repositories) for what it sets up.
+
 ## Required Flags
 
 These options can only be inferred when running on an existing repository.
@@ -47,6 +49,7 @@ Most default to a value inferred from an existing repository if transitioning on
 | `--catalogs`              | `string`   | [pnpm catalogs](./Blocks.md#package-management) mode: `default`, `named`, or `none` | `"default"`                              |
 | `--email`                 | `string`   | Author email for `package.json` files                                               | _(none)_                                 |
 | `--formatter`             | `string`   | `biome` _(existing repositories only)_, `none`, `oxfmt`, or `prettier`              | `"oxfmt"`                                |
+| `--keywords`              | `string[]` | Keywords for new packages and a new GitHub repository's topics                      | _(none)_                                 |
 | `--linter`                | `string`   | `eslint` or `none`                                                                  | `"eslint"`                               |
 | `--newPackage`            | `string`   | Name of a package to add under `packages/`                                          | The `repository`, if it's new            |
 | `--newPackageDescription` | `string`   | 'Sentence case.' description of the `--newPackage`                                  | `"The <newPackage> package in <title>."` |

@@ -58,6 +58,8 @@ The `--catalogs` flag sets how [pnpm catalogs](https://pnpm.io/catalogs) are use
 
 [**Renovate**](https://docs.renovatebot.com): Keeps dependencies up-to-date.
 
+**GitHub repository settings**: [Sets up](./Setup.md#remote-repositories) new repositories' descriptions, labels, rulesets, and topics.
+
 **VS Code**: Extensions, settings, and debugging tasks.
 
 Contributing docs, issue and PR templates, a code of conduct, a license, and a security policy are also created.

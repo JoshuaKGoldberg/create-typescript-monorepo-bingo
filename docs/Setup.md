@@ -16,6 +16,16 @@ You'll then need to do some [manual setup](#manual-setup) for GitHub apps and np
 Your new repository will then be ready for development!
 Hooray! 🥳
 
+## Remote Repositories
+
+With `--remote`, the script will also create a public repository on GitHub with:
+
+- The description, and `--keywords` as topics
+- Labels used by issue templates and Renovate
+- Only squash merging allowed, with auto-merge and automatic branch deletion
+- A ruleset that requires PRs and CI checks on `main`, which admins can bypass
+- Secret scanning and push protection
+
 ## Manual Setup
 
 Some tooling needs settings that `create-typescript-monorepo-bingo` can't set up for you.
