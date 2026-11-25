@@ -25,6 +25,13 @@ export function getRepositoryUrl(options: RootOptions): string {
 }
 
 /**
+ * Jobs that need the GitHub App would otherwise fail until it's been set up.
+ */
+export function getReleaseAppCondition(options: RootOptions): string {
+  return `github.event.repository.fork != true && vars.${options.releaseApp ?? defaults.releaseApp}_CLIENT_ID != ''`;
+}
+
+/**
  * Attribution is required by eslint-plugin-package-json.
  */
 export function getAuthor(options: RootOptions): { email?: string; name: string } {

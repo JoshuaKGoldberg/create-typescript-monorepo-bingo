@@ -23,6 +23,7 @@ Some tooling needs settings that `create-typescript-monorepo-bingo` can't set up
 ### Release GitHub App
 
 The _Release_ and _Transitions_ workflows use a [GitHub App](https://docs.github.com/en/apps/creating-github-apps).
+They're skipped until it's set up.
 
 1. Create a GitHub App with **Contents**, **Pull requests**, and **Workflows** write permissions
 2. Install it on the repository

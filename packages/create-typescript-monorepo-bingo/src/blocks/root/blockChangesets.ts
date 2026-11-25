@@ -6,7 +6,7 @@ import { defaults } from '../../options.ts';
 import { action, createSetupSteps } from '../../utils/actions.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatJson } from '../../utils/json.ts';
-import { getWorkflowPath } from '../../utils/options.ts';
+import { getReleaseAppCondition, getWorkflowPath } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import { formatYamlFile } from '../../utils/yaml.ts';
 import { blockCSpell } from './blockCSpell.ts';
@@ -104,7 +104,7 @@ export const blockChangesets = rootBase.createBlock({
       jobs: {
         select_mode: {
           name: 'Select Mode',
-          if: 'github.event.repository.fork != true',
+          if: getReleaseAppCondition(options),
           'runs-on': 'ubuntu-latest',
           permissions: { contents: 'read' },
           outputs: {
