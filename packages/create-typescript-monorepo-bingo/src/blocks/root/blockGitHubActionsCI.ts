@@ -2,7 +2,8 @@ import semver from 'semver';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
-import { defaults } from '../../options.ts';
+import { defaults, type RootOptions } from '../../options.ts';
+import { createSetupSteps } from '../../utils/actions.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { getWorkflowPath } from '../../utils/options.ts';
 import { formatYamlFile } from '../../utils/yaml.ts';
@@ -33,19 +34,7 @@ export const ciJobSchema = z.object({
 export type CIJob = z.infer<typeof ciJobSchema>;
 
 /**
- * The shared setup step: bingo's `$/.github/actions/setup`, which checks out,
- * installs pnpm and Node.js, and installs dependencies.
- */
-function createSetupStep(inputs?: Record<string, unknown>): WorkflowStep {
-  return {
-    uses: '$/.github/actions/setup',
-    ...(inputs && Object.keys(inputs).length && { with: inputs }),
-  };
-}
-
-/**
- * Gets the Node.js versions to test, from an `engines.node` range:
- * each lower bound's exact version, plus its major's latest.
+ * Gets each lower bound in an `engines.node` range, plus the latest of its major version.
  */
 export function getNodeVersionsMatrix(nodeEngines: string): (number | string)[] {
   const versions: (number | string)[] = [];
@@ -61,13 +50,10 @@ export function getNodeVersionsMatrix(nodeEngines: string): (number | string)[] 
     }
   }
 
-  // GitHub Actions rejects an empty matrix.
+  // GitHub Actions rejects empty matrices
   return versions.length ? [...new Set(versions)] : [Number(defaults.node.split('.')[0])];
 }
 
-/**
- * Owns the CI workflow. Other Blocks send jobs to it, each with an explicit id.
- */
 export const blockGitHubActionsCI = rootBase.createBlock({
   about: {
     name: 'GitHub Actions CI',
@@ -83,7 +69,7 @@ export const blockGitHubActionsCI = rootBase.createBlock({
     return {
       ...(existing !== undefined && { existing }),
       ...(rootScripts && { rootScripts }),
-      // A repository's own setup action may not take the inputs the engines check needs.
+      // Existing setup actions may not take the inputs the engines check needs
       ...(setupAction !== undefined &&
         !setupAction.includes('install-flags') && { setupLacksInstallFlags: true }),
     };
@@ -116,10 +102,8 @@ export const blockGitHubActionsCI = rootBase.createBlock({
       ...(props.jobs ?? []),
     ];
 
-    // Stratum re-runs a Block whenever its props change, and job arrays only grow,
-    // so an earlier version of a job can still be in props: the latest one wins.
-    // The engines check installs every workspace package, so it only applies when all of
-    // them are CTM's: a site or other repository-owned package may need newer Node.js.
+    // Stratum re-runs Blocks as props change, so the latest version of each job wins.
+    // The engines check installs all packages, some of which may need newer Node.js versions.
     const hasUnmanaged = (options.packages ?? []).some(
       (pkg) => pkg.kind === 'site' || pkg.kind === 'repo-owned',
     );
@@ -145,7 +129,7 @@ export const blockGitHubActionsCI = rootBase.createBlock({
                 jobs: Object.fromEntries(
                   [...byId.values()]
                     .sort((a, b) => a.id.localeCompare(b.id))
-                    .map((job) => [job.id, createJob(job)]),
+                    .map((job) => [job.id, createJob(job, options)]),
                 ),
               },
               props.existing,
@@ -153,6 +137,7 @@ export const blockGitHubActionsCI = rootBase.createBlock({
                 name: `.github/workflows/ci.${options.workflowExtension ?? 'yaml'}`,
                 nodeEngines: options.nodeEngines ?? defaults.nodeEngines,
                 scripts: props.rootScripts,
+                sorted: options.workflowKeysSorted,
                 workflow: true,
               },
             ).replace('pull_request: null', 'pull_request: ~'),
@@ -163,14 +148,14 @@ export const blockGitHubActionsCI = rootBase.createBlock({
   },
 });
 
-function createJob(job: CIJob) {
+function createJob(job: CIJob, options: RootOptions) {
   return {
     ...(job.if && { if: job.if }),
     name: job.name,
     'runs-on': job.runsOn ?? 'ubuntu-latest',
     ...(job.permissions && { permissions: job.permissions }),
     ...(job.strategy && { strategy: job.strategy }),
-    steps: [createSetupStep(job.setup), ...job.steps],
+    steps: [...createSetupSteps(options, job.setup), ...job.steps],
   };
 }
 

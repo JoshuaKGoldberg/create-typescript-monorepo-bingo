@@ -92,7 +92,57 @@ function transition(files: IntakeDirectory, options: Partial<RootOptions> = {}) 
   });
 }
 
-describe('transitions of existing files', () => {
+function setManifest(
+  files: IntakeDirectory,
+  path: string,
+  update: (manifest: Partial<Record<string, Record<string, string>>>) => void,
+) {
+  const manifest = JSON.parse(getFile(files, path) ?? '{}') as Partial<
+    Record<string, Record<string, string>>
+  >;
+  update(manifest);
+  setFile(files, path, JSON.stringify(manifest, null, 2));
+}
+
+function editJson(
+  files: IntakeDirectory,
+  path: string,
+  edit: (json: Record<string, unknown>) => void,
+) {
+  const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
+  edit(json);
+  setFile(files, path, JSON.stringify(json, null, 2));
+}
+
+const choicesKey = 'create-typescript-monorepo-bingo';
+
+const createExisting = (manifest: object = {}): IntakeDirectory => ({
+  'package.json': [JSON.stringify({ name: 'root', private: true, type: 'module', ...manifest })],
+  'pnpm-workspace.yaml': ["packages:\n  - 'packages/*'\n"],
+  packages: {
+    a: {
+      'package.json': ['{ "name": "a", "devDependencies": { "tsdown": "^0.23.7" } }'],
+      'tsdown.config.ts': ["export default { entry: ['src/index.ts'] };\n"],
+    },
+  },
+});
+
+const choicesText = `"${choicesKey}": {`;
+
+function prepare(files: IntakeDirectory) {
+  return prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never });
+}
+
+function withoutFormatter() {
+  const files = createRepository();
+  delete (files as Record<string, unknown>)['oxfmt.config.ts'];
+  editJson(files, 'package.json', (manifest) => {
+    delete (manifest.devDependencies as Record<string, string>).oxfmt;
+  });
+  return files;
+}
+
+describe('transitions', () => {
   it('keeps comments and custom options in a JSONC tsconfig', () => {
     const files = createRepository();
     setFile(
@@ -218,7 +268,7 @@ export default config;
     const files = createRepository();
 
     expect(() => transition(files, { newPackage: '@other/example' })).toThrow(
-      /packages\/example already holds example/,
+      /packages\/example because it already contains example/,
     );
   });
 
@@ -457,7 +507,7 @@ export default config;
     const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
       devDependencies: Record<string, string>;
     };
-    // A repository that never had CTM's formatter or hooks.
+    // A repository that never had CTM's formatter or hooks
     for (const name of ['oxfmt', 'lint-staged', 'simple-git-hooks']) {
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete manifest.devDependencies[name];
@@ -757,7 +807,7 @@ export default config;
     expect(output).toContain('packages/second');
   });
 
-  it('infers pnpm as the task runner from recursive test scripts, and per-package builds from recursive builds', () => {
+  it('infers pnpm tasks and per-package builds from recursive scripts', () => {
     const read = (scripts: Record<string, string>) => {
       const files = createRepository();
       const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
@@ -765,14 +815,14 @@ export default config;
       };
       manifest.scripts = { ...manifest.scripts, ...scripts };
       setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
-      return prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never });
+      return prepare(files);
     };
 
     for (const test of ['pnpm -r test', 'pnpm --parallel -r test', 'pnpm -F "./packages/*" test']) {
       expect(read({ test }).taskRunner).toBe('pnpm');
     }
 
-    // CTM's own per-package build, for packages tsdown's workspace mode skips, stays as it is.
+    // Per-package builds written by CTM should be kept
     const recursive = read({ build: 'pnpm --recursive --filter "./packages/*" run build' });
     expect(recursive.taskRunner).toBe('none');
     expect(recursive.recursiveBuild).toBe(true);
@@ -823,7 +873,7 @@ export default config;
     expect(creation.suggestions).toContainEqual(expect.stringContaining('packages/example'));
   });
 
-  it('counts a turbo repository whose packages test with Vitest as using Vitest', () => {
+  it('counts a Turborepo repository whose packages test with Vitest as using Vitest', () => {
     const files = createRepository();
     const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
       devDependencies: Record<string, string>;
@@ -838,9 +888,7 @@ export default config;
     pkg.scripts = { ...pkg.scripts, test: 'vitest run' };
     setFile(files, 'packages/example/package.json', JSON.stringify(pkg, null, 2));
 
-    expect(
-      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).testRunner,
-    ).toBeUndefined();
+    expect(prepare(files).testRunner).toBeUndefined();
   });
 
   it('gives a repository testing with something else no Vitest starter test or lint rules', () => {
@@ -945,12 +993,10 @@ export default config;
     pkg.scripts = { ...pkg.scripts, test: 'jest' };
     setFile(files, 'packages/example/package.json', JSON.stringify(pkg, null, 2));
 
-    expect(
-      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).testRunner,
-    ).toBe('other');
+    expect(prepare(files).testRunner).toBe('other');
   });
 
-  it("drops Vitest lint rules from CTM's own ESLint config when a repository stops using Vitest", () => {
+  it('drops CTM Vitest lint rules when a repository stops using Vitest', () => {
     const files = createRepository();
     const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as {
       devDependencies: Record<string, string>;
@@ -997,7 +1043,7 @@ export default config;
     const single = createRepository();
     setHomepage(single, 'packages/example', 'https://example.dev');
 
-    // Each sibling having a homepage of its own gives the new package its GitHub directory.
+    // Siblings with their own homepages give the new package its GitHub directory
     expect(
       getFile(transition(single, { newPackage: 'second' }).files, 'packages/second/package.json'),
     ).toContain(
@@ -1087,16 +1133,12 @@ export default config;
     manifest.scripts.build = 'tsdown && pnpm --filter ./docs build';
     setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
 
-    expect(
-      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).recursiveBuild,
-    ).toBeUndefined();
+    expect(prepare(files).recursiveBuild).toBeUndefined();
 
     manifest.scripts.build = 'pnpm --filter "./packages/*" build';
     setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
 
-    expect(
-      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).recursiveBuild,
-    ).toBe(true);
+    expect(prepare(files).recursiveBuild).toBe(true);
   });
 
   it('keeps another test runner in a managed repository whose ESLint config it took over', () => {
@@ -1107,24 +1149,8 @@ export default config;
       (getFile(files, 'eslint.config.ts') ?? '').replace(ownedFileMarker, ''),
     );
 
-    expect(
-      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).testRunner,
-    ).toBe('other');
+    expect(prepare(files).testRunner).toBe('other');
   });
-});
-
-describe('round 11 regressions', () => {
-  const setManifest = (
-    files: IntakeDirectory,
-    path: string,
-    update: (manifest: Partial<Record<string, Record<string, string>>>) => void,
-  ) => {
-    const manifest = JSON.parse(getFile(files, path) ?? '{}') as Partial<
-      Record<string, Record<string, string>>
-    >;
-    update(manifest);
-    setFile(files, path, JSON.stringify(manifest, null, 2));
-  };
 
   it('keeps the Vitest import an edited Vitest entry still uses without Vitest', () => {
     const files = createRepository();
@@ -1165,9 +1191,7 @@ describe('round 11 regressions', () => {
       delete manifest.devDependencies?.vitest;
     });
 
-    expect(
-      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).testRunner,
-    ).toBeUndefined();
+    expect(prepare(files).testRunner).toBeUndefined();
   });
 
   it('names Vitest projects by path when folder names repeat across parents', () => {
@@ -1268,32 +1292,7 @@ describe('round 11 regressions', () => {
       manifest.scripts = { ...manifest.scripts, build };
     });
 
-    expect(
-      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).recursiveBuild,
-    ).toBe(expected);
-  });
-});
-
-describe('round 19 regressions', () => {
-  const editJson = (
-    files: IntakeDirectory,
-    path: string,
-    edit: (json: Record<string, unknown>) => void,
-  ) => {
-    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
-    edit(json);
-    setFile(files, path, JSON.stringify(json, null, 2));
-  };
-  const key = 'create-typescript-monorepo-bingo';
-  const createExisting = (manifest: object = {}): IntakeDirectory => ({
-    'package.json': [JSON.stringify({ name: 'root', private: true, type: 'module', ...manifest })],
-    'pnpm-workspace.yaml': ["packages:\n  - 'packages/*'\n"],
-    packages: {
-      a: {
-        'package.json': ['{ "name": "a", "devDependencies": { "tsdown": "^0.23.7" } }'],
-        'tsdown.config.ts': ["export default { entry: ['src/index.ts'] };\n"],
-      },
-    },
+    expect(prepare(files).recursiveBuild).toBe(expected);
   });
 
   it('lints config files untyped, and expects no build, where TypeScript is kept', () => {
@@ -1338,33 +1337,20 @@ describe('round 19 regressions', () => {
   });
 
   it.each(['text', ['x'], null, true, {}, { linter: 'biome' }])(
-    'leaves a value of %o it does not recognize alone',
+    'leaves an unrecognized choices value of %o alone',
     (value) => {
       const files = createRepository();
       editJson(files, 'package.json', (manifest) => {
-        manifest[key] = value;
+        manifest[choicesKey] = value;
       });
       const before = getFile(files, 'package.json');
 
       expect(getFile(transition(files).files, 'package.json') ?? before).toBe(before);
     },
   );
-});
-
-describe('round 17 regressions', () => {
-  const choicesText = '"create-typescript-monorepo-bingo": {';
-  const editJson = (
-    files: IntakeDirectory,
-    path: string,
-    edit: (json: Record<string, unknown>) => void,
-  ) => {
-    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
-    edit(json);
-    setFile(files, path, JSON.stringify(json, null, 2));
-  };
 
   it.each([{}, { formatter: 'prettier' }, { formatter: 'none' }, { testRunner: 'other' }] as const)(
-    'remembers nothing for %o, which files show',
+    'does not store choices of %o that files show',
     (options) => {
       const files = createRepository(options);
 
@@ -1380,9 +1366,7 @@ describe('round 17 regressions', () => {
     const files = createRepository({ formatter: 'prettier' });
     setFile(files, 'oxfmt.config.ts', 'export default {};\n');
 
-    expect(
-      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).formatter,
-    ).not.toBe('prettier');
+    expect(prepare(files).formatter).not.toBe('prettier');
   });
 
   it('leaves ESLint out with --linter none', () => {
@@ -1482,8 +1466,7 @@ describe('round 17 regressions', () => {
       (manifest.scripts as Record<string, string>)['lint:biome'] =
         'biome check --formatter-enabled=false .';
     });
-    const infer = () =>
-      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).formatter;
+    const infer = () => prepare(files).formatter;
 
     expect(infer()).toBe('prettier');
     applyFiles(files, transition(files, { formatter: 'biome' }).files);
@@ -1502,9 +1485,7 @@ describe('round 17 regressions', () => {
     const files = createRepository();
     applyFiles(files, transition(files, { taskRunner: 'pnpm' }).files);
 
-    expect(
-      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).taskRunner,
-    ).toBe('pnpm');
+    expect(prepare(files).taskRunner).toBe('pnpm');
   });
 
   it('keeps TypeScript where tsconfigs use options TypeScript 7 removed', () => {
@@ -1577,28 +1558,6 @@ describe('round 17 regressions', () => {
 
     expect(getFile(transition(files).files, '.gitignore')).not.toContain('!packages/build/');
   });
-});
-
-describe('round 16 regressions', () => {
-  const editJson = (
-    files: IntakeDirectory,
-    path: string,
-    edit: (json: Record<string, unknown>) => void,
-  ) => {
-    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
-    edit(json);
-    setFile(files, path, JSON.stringify(json, null, 2));
-  };
-  const prepare = (files: IntakeDirectory) =>
-    prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never });
-  const withoutFormatter = () => {
-    const files = createRepository();
-    delete (files as Record<string, unknown>)['oxfmt.config.ts'];
-    editJson(files, 'package.json', (manifest) => {
-      delete (manifest.devDependencies as Record<string, string>).oxfmt;
-    });
-    return files;
-  };
 
   it('never formats files of a repository without a formatter CTM knows', () => {
     const files = withoutFormatter();
@@ -1707,18 +1666,6 @@ describe('round 16 regressions', () => {
     expect(getFile(files, 'eslint.config.ts')).not.toContain('order-properties');
     expect(applyFiles(files, transition(files).files)).toEqual([]);
   });
-});
-
-describe('round 15 adoption regressions', () => {
-  const editJson = (
-    files: IntakeDirectory,
-    path: string,
-    edit: (json: Record<string, unknown>) => void,
-  ) => {
-    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
-    edit(json);
-    setFile(files, path, JSON.stringify(json, null, 2));
-  };
 
   it('turns off package.json order rules for unsorted manifests', () => {
     const files = createRepository();
@@ -1750,7 +1697,7 @@ describe('round 15 adoption regressions', () => {
     );
   });
 
-  it("suggests a root build that doesn't build tsdown packages include them", () => {
+  it("suggests updating a root build that doesn't build tsdown packages", () => {
     const files = createRepository();
     editJson(files, 'package.json', (manifest) => {
       (manifest.scripts as Record<string, string>).build = 'tsc -b';
@@ -1758,18 +1705,6 @@ describe('round 15 adoption regressions', () => {
 
     expect(transition(files).suggestions).toContainEqual(expect.stringContaining('`tsc -b`'));
   });
-});
-
-describe('round 15 regressions', () => {
-  const editJson = (
-    files: IntakeDirectory,
-    path: string,
-    edit: (json: Record<string, unknown>) => void,
-  ) => {
-    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
-    edit(json);
-    setFile(files, path, JSON.stringify(json, null, 2));
-  };
 
   it("keeps a repository's own package.json entry next to CTM's missing-fields entry", () => {
     const files = createRepository();
@@ -1794,7 +1729,7 @@ describe('round 15 regressions', () => {
     expect(config).toContain("'package-json/require-sideEffects': 'off'");
     expect(applyFiles(files, transition(files).files)).toEqual([]);
 
-    // Once the field is filled in, CTM's entry goes away and the repository's stays.
+    // Filling in the field removes CTM's entry but not the repository's
     setFile(files, 'packages/example/package.json', originalManifest);
     applyFiles(files, transition(files).files);
 
@@ -1848,9 +1783,7 @@ describe('round 15 regressions', () => {
       (manifest.devDependencies as Record<string, string>)['@biomejs/biome'] = '^2.0.0';
     });
 
-    expect(
-      prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).formatter,
-    ).toBe('prettier');
+    expect(prepare(files).formatter).toBe('prettier');
   });
 
   it('refuses Biome as the formatter of a new repository', () => {
@@ -1863,20 +1796,6 @@ describe('round 15 regressions', () => {
 
     expect(getFile(transition(files).files, 'tsconfig.json')).toContain('"./*.config.ts"');
   });
-});
-
-describe('round 14 adoption regressions', () => {
-  const editJson = (
-    files: IntakeDirectory,
-    path: string,
-    edit: (json: Record<string, unknown>) => void,
-  ) => {
-    const json = JSON.parse(getFile(files, path) ?? '{}') as Record<string, unknown>;
-    edit(json);
-    setFile(files, path, JSON.stringify(json, null, 2));
-  };
-  const prepare = (files: IntakeDirectory) =>
-    prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never });
 
   it('leaves a root tsconfig.json that packages extend alone', () => {
     const files = createRepository();
@@ -2011,7 +1930,7 @@ describe('round 14 adoption regressions', () => {
     expect(creation.suggestions).toContainEqual(expect.stringContaining('packages/example'));
   });
 
-  it("doesn't repeat nx project.json targets as scripts", () => {
+  it("doesn't repeat Nx project.json targets as scripts", () => {
     const files = createRepository({ taskRunner: 'nx' });
     setFile(files, 'packages/example/project.json', '{ "targets": { "build": {}, "test": {} } }\n');
     editJson(files, 'packages/example/package.json', (manifest) => {
@@ -2029,14 +1948,6 @@ describe('round 14 adoption regressions', () => {
 
     expect(transition(files).suggestions).toContainEqual(expect.stringContaining('packages/**'));
   });
-});
-
-describe('round 14 regressions', () => {
-  const editRoot = (files: IntakeDirectory, edit: (manifest: Record<string, unknown>) => void) => {
-    const manifest = JSON.parse(getFile(files, 'package.json') ?? '{}') as Record<string, unknown>;
-    edit(manifest);
-    setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
-  };
 
   it("doesn't add the build package to an existing package that doesn't use it", () => {
     const files = createRepository();
@@ -2088,7 +1999,7 @@ describe('round 14 regressions', () => {
 
   it("doesn't count vue-tsc as running tsc", () => {
     const files = createRepository();
-    editRoot(files, (manifest) => {
+    editJson(files, 'package.json', (manifest) => {
       (manifest.scripts as Record<string, string>).typecheck = 'vue-tsc --noEmit';
     });
 
@@ -2097,7 +2008,7 @@ describe('round 14 regressions', () => {
 
   it('fills in a missing root description', () => {
     const files = createRepository();
-    editRoot(files, (manifest) => {
+    editJson(files, 'package.json', (manifest) => {
       delete manifest.description;
     });
 
@@ -2105,9 +2016,7 @@ describe('round 14 regressions', () => {
       '"description": "An example monorepo."',
     );
   });
-});
 
-describe('round 13 adoption regressions', () => {
   it('allows the owner and a new package name in spell checking', () => {
     const files = createRepository({ owner: 'widgetco' });
 
@@ -2151,9 +2060,7 @@ describe('round 13 adoption regressions', () => {
       getFile(transition(files, { newPackage: 'probe' }).files, 'packages/probe/package.json'),
     ).toContain('"vitest": "catalog:"');
   });
-});
 
-describe('round 13 regressions', () => {
   it('has Knip ignore root build tools packages only use indirectly', () => {
     const files = createRepository({ taskRunner: 'turbo' });
     const pkg = JSON.parse(getFile(files, 'packages/example/package.json') ?? '{}') as {
@@ -2200,9 +2107,7 @@ describe('round 13 regressions', () => {
     expect(config).toContain('vitest = 1;');
     expect(config).not.toContain('@vitest/eslint-plugin');
   });
-});
 
-describe('round 12 regressions', () => {
   it('gives a new package the tsdown and vitest devDependencies most siblings declare', () => {
     const files = createRepository();
     applyFiles(files, transition(files, { newPackage: 'second' }).files);
@@ -2279,21 +2184,19 @@ describe('round 12 regressions', () => {
     expect(config).toContain("{ ignores: ['vitest.config.ts'] }");
     expect(config).not.toContain('@vitest/eslint-plugin');
   });
-});
 
-describe('round 11 adoption regressions', () => {
   it('references the build package from a new package', () => {
     const files = createRepository();
     const output = transition(files, { newPackage: 'second' }).files;
 
     expect(getFile(output, 'packages/second/tsconfig.json')).toContain('"path": "../build"');
-    // Existing packages keep their own references.
+    // Existing packages keep their own references
     expect(getFile(output, 'packages/example/tsconfig.json')).toBe(
       getFile(files, 'packages/example/tsconfig.json'),
     );
   });
 
-  it("doesn't add a root tsdown config or build dependency a repository's own build doesn't use", () => {
+  it("doesn't add a root tsdown config or build dependency that the root build doesn't use", () => {
     const files = createRepository();
     delete (files as Record<string, unknown>)['tsdown.config.ts'];
     setFile(
@@ -2322,9 +2225,7 @@ describe('round 11 adoption regressions', () => {
     manifest.contributors = [{ email: 'someone@example.com', name: 'Some One' }];
     setFile(files, 'package.json', JSON.stringify(manifest, null, 2));
 
-    expect(prepareRoot({ files, log: vi.fn(), options: {}, take: vi.fn() as never }).author).toBe(
-      undefined,
-    );
+    expect(prepare(files).author).toBe(undefined);
   });
 
   it("doesn't add a typecheck job a matrix step already runs", () => {
@@ -2351,7 +2252,496 @@ jobs:
     expect(workflow).not.toContain('type_check:');
     expect(workflow).not.toContain('\n  build:');
   });
+
+  describe('a repository built with its own tools', () => {
+    it('only changes what it needs to', () => {
+      const files = createScriptBuilt();
+
+      expect(applyFiles(files, transition(files).files).sort()).toEqual([
+        '.github/workflows/transitions.yml',
+        '.vscode/extensions.json',
+        'cspell.json',
+      ]);
+      expect(applyFiles(files, transition(files).files)).toEqual([]);
+    });
+
+    it('uses its setup action and sorted workflow keys', () => {
+      const output = transition(createScriptBuilt()).files;
+      const workflow = getFile(output, '.github/workflows/transitions.yml') ?? '';
+
+      expect(getFile(output, '.github/actions/setup/action.yml')).toBeUndefined();
+      expect(workflow).toContain('- uses: ./.github/actions/prepare');
+      expect(Object.keys(parseYaml(workflow) as object)).toEqual([
+        'jobs',
+        'name',
+        'on',
+        'permissions',
+      ]);
+    });
+
+    it("adds a setup action when a job needs inputs its own doesn't have", () => {
+      const files = createScriptBuilt();
+      setFile(files, '.github/workflows/ci.yml', 'jobs: {}\nname: CI\non:\n  pull_request: ~\n');
+
+      const output = transition(files).files;
+
+      expect(getFile(output, '.github/actions/setup/action.yml')).toMatch(/^description: /);
+      expect(Object.keys(getJobs(output))).toEqual([...Object.keys(getJobs(output))].sort());
+      expect(getJobs(output)).toHaveProperty('test_node');
+    });
+
+    it("doesn't suggest replacing a Vitest config for tests outside of packages", () => {
+      const { suggestions } = transition(createScriptBuilt());
+
+      expect(suggestions).toContain(
+        "vitest.config.ts wasn't replaced because there are tests other than packages' src/**/*.test.ts files.",
+      );
+      expect(suggestions?.join('\n')).not.toContain('vitest.config.ts already exists');
+    });
+
+    it('builds references in an existing tsc script when adding a package', () => {
+      const files = createScriptBuilt();
+      const options = { newPackage: '@example/quandrix' };
+
+      applyFiles(files, transition(files, options).files);
+
+      expect(JSON.parse(getFile(files, 'package.json') ?? '')).toMatchObject({
+        scripts: { tsc: 'tsc -b tsconfig.build.json && tsc -b' },
+      });
+      expect(getFile(files, 'package.json')).not.toContain('"typecheck"');
+      expect(getFile(files, 'cspell.json')).toContain('quandrix');
+      expect(getFile(files, 'cspell.json')).not.toContain('"example"');
+      expect(applyFiles(files, transition(files).files)).toEqual([]);
+    });
+
+    it('switches Prettier scripts with --formatter oxfmt', () => {
+      const files = createScriptBuilt();
+
+      const creation = transition(files, { formatter: 'oxfmt' });
+      applyFiles(files, creation.files);
+
+      expect(JSON.parse(getFile(files, 'package.json') ?? '')).toMatchObject({
+        'lint-staged': { '*': 'oxfmt --no-error-on-unmatched-pattern' },
+        scripts: { format: 'oxfmt' },
+      });
+      expect(creation.suggestions).toContainEqual(expect.stringContaining("Remove Prettier's"));
+      expect(applyFiles(files, transition(files).files)).toEqual([]);
+    });
+
+    it.each([
+      ['deploys', '    - uses: pnpm/setup@v3\n    - run: pnpm install\n    - run: pnpm run deploy'],
+      ["doesn't set up pnpm", '    - run: pnpm install'],
+      [
+        'also uses another action',
+        '    - uses: pnpm/setup@v3\n    - uses: a/deploy@v1\n    - run: pnpm install',
+      ],
+      [
+        'sometimes installs',
+        '    - uses: pnpm/setup@v3\n    - run: pnpm install\n      if: inputs.install',
+      ],
+      ['has malformed steps', '    -\n    - run: 1'],
+      [
+        'installs elsewhere',
+        '    - uses: pnpm/setup@v3\n    - run: pnpm install\n      working-directory: docs',
+      ],
+    ])("doesn't use an action that %s", (_, steps) => {
+      const files = createScriptBuilt();
+      setFile(
+        files,
+        '.github/actions/prepare/action.yml',
+        `runs:\n  using: composite\n  steps:\n${steps}\n`,
+      );
+
+      expect(prepare(files).setupAction).toBeUndefined();
+    });
+
+    it('prefers an action named prepare, and not one with required inputs', () => {
+      const files = createScriptBuilt();
+      const action = getFile(files, '.github/actions/prepare/action.yml') ?? '';
+      delete (files['.github'] as IntakeDirectory).actions;
+      setFile(files, '.github/actions/all/action.yml', action);
+      setFile(files, '.github/actions/prepare/action.yml', action);
+      expect(prepare(files).setupAction).toBe('prepare');
+
+      const required = `inputs:\n  token:\n    required: true\n${action}`;
+      setFile(files, '.github/actions/prepare/action.yml', required);
+      expect(prepare(files).setupAction).toBe('all');
+    });
+
+    it('checks out before an existing setup action that does not', () => {
+      const files = createScriptBuilt();
+      setFile(files, '.github/actions/setup/action.yml', 'runs: {}\n');
+
+      expect(getFile(transition(files).files, '.github/workflows/transitions.yml')).toMatch(
+        /- uses: actions\/checkout@.+\n.+\n.+\n {6}- uses: \.\/\.github\/actions\/setup/,
+      );
+    });
+
+    it("doesn't add release jobs that need jobs with other ids or outputs", () => {
+      const files = createScriptBuilt();
+      const workflow = getFile(files, '.github/workflows/release.yml') ?? '';
+      setFile(
+        files,
+        '.github/workflows/release.yml',
+        workflow
+          .replace('  select_mode:', '  mode:')
+          .replace(/ {2}publish:[\s\S]*?(?= {2}mode)/, ''),
+      );
+
+      expect(getFile(transition(files).files, '.github/workflows/release.yml')).toBe(
+        getFile(files, '.github/workflows/release.yml'),
+      );
+    });
+
+    it("doesn't add test jobs when an existing one builds first", () => {
+      const files = createScriptBuilt();
+      setManifest(files, 'package.json', (manifest) => {
+        manifest.scripts = { ...manifest.scripts, test: 'vitest run' };
+      });
+      const workflow = getFile(files, '.github/workflows/ci.yml') ?? '';
+      setFile(
+        files,
+        '.github/workflows/ci.yml',
+        workflow.replace('  test:\n', '  tests:\n').replace(/.+codecov.+\n/, ''),
+      );
+
+      expect(applyFiles(files, transition(files).files)).not.toContain('.github/workflows/ci.yml');
+    });
+
+    it("doesn't narrow a root tsconfig without an include", () => {
+      const files = createScriptBuilt();
+      const tsconfig = '{ "compilerOptions": { "noEmit": true } }\n';
+      setFile(files, 'tsconfig.json', tsconfig);
+      delete (files as Record<string, unknown>)['knip.json'];
+
+      applyFiles(files, transition(files).files);
+
+      expect(JSON.parse(getFile(files, 'tsconfig.json') ?? '')).not.toHaveProperty('include');
+    });
+
+    it("adds a type check job for a tsc script that's now equivalent", () => {
+      const files = createScriptBuilt();
+      removeJob(files, 'type_check');
+      setManifest(files, 'package.json', (manifest) => {
+        manifest.scripts = { ...manifest.scripts, lint: 'tsc --noEmit --pretty', tsc: 'tsc' };
+      });
+
+      const creation = transition(files, { newPackage: 'quandrix' });
+      applyFiles(files, creation.files);
+
+      expect(getJobs(files)).toMatchObject({
+        type_check: { steps: [{}, {}, { run: 'pnpm tsc' }] },
+      });
+      expect(creation.suggestions).toContainEqual(
+        expect.stringMatching(/don't build project references: lint\./),
+      );
+      expect(getFile(files, '.vscode/settings.json')).toContain('@typescript/old/lib');
+      expect(applyFiles(files, transition(files).files)).toEqual([]);
+    });
+
+    it.each([
+      ['tsc', {}, 'tsc -b'],
+      ['cd packages/a && tsc', {}, 'cd packages/a && tsc'],
+      ['tsc -p tsconfig.build.json', {}, 'tsc -p tsconfig.build.json'],
+      ['tsc', { noEmit: false }, 'tsc'],
+      ['tsc', { outDir: 'out' }, 'tsc'],
+      ['tsc --noEmit', { outDir: 'out' }, 'tsc -b'],
+    ])('handles a script of %s with compiler options %o', (script, compilerOptions, expected) => {
+      const files = createScriptBuilt();
+      setFile(files, 'tsconfig.json', JSON.stringify({ compilerOptions, include: ['test'] }));
+      setManifest(files, 'package.json', (manifest) => {
+        manifest.scripts = { build: 'pnpm run -r build', check: script };
+      });
+
+      const creation = transition(files, { newPackage: 'quandrix' });
+      applyFiles(files, creation.files);
+
+      expect(JSON.parse(getFile(files, 'package.json') ?? '')).toMatchObject({
+        scripts: { check: expected },
+      });
+      expect(getFile(files, 'tsconfig.json')?.includes('"noEmit": true')).toBe(
+        !('noEmit' in compilerOptions) && !('outDir' in compilerOptions && script === 'tsc'),
+      );
+      expect(creation.suggestions?.join('\n').includes("don't build project references")).toBe(
+        expected === 'tsc',
+      );
+    });
+
+    it('keeps tsc scripts when references already exist', () => {
+      const files = createScriptBuilt();
+      editJson(files, 'tsconfig.json', (tsconfig) => {
+        tsconfig.references = [{ path: './packages/a' }];
+      });
+
+      applyFiles(files, transition(files, { newPackage: 'quandrix' }).files);
+
+      expect(getFile(files, 'package.json')).toContain('"tsc -b tsconfig.build.json && tsc"');
+    });
+
+    it('adds test jobs when an existing one only installs first', () => {
+      const files = createScriptBuilt();
+      removeJob(files, 'test');
+      const workflow = getFile(files, '.github/workflows/ci.yml') ?? '';
+      setFile(
+        files,
+        '.github/workflows/ci.yml',
+        workflow.replace(
+          '  type_check:',
+          '  tests:\n    steps:\n      - run: pnpm install --frozen-lockfile\n      - run: pnpm test run\n  type_check:',
+        ),
+      );
+
+      const jobs = Object.keys(getJobs(transition(files).files));
+
+      expect(jobs).toContain('test_os');
+      expect(jobs).toEqual([...jobs].sort());
+    });
+
+    it('adds release jobs in one transition when the ones they need are found', () => {
+      const files = createScriptBuilt();
+      setFile(
+        files,
+        '.github/workflows/release.yml',
+        `jobs:
+  select_mode:
+    outputs:
+      mode: a
+      publish-plan-artifact-id: b
+    steps:
+      - uses: changesets/action/select-mode@v2
+name: Release
+`,
+      );
+
+      applyFiles(files, transition(files).files);
+
+      expect(Object.keys(getJobs(files, 'release'))).toEqual([
+        'comment',
+        'pack',
+        'publish',
+        'select_mode',
+        'version',
+      ]);
+      expect(applyFiles(files, transition(files).files)).toEqual([]);
+    });
+
+    it('only sorts new workflows if all existing ones are sorted', () => {
+      const files = createScriptBuilt();
+      setFile(files, '.github/workflows/unsorted.yml', 'name: Unsorted\njobs: {}\n');
+
+      expect(getFile(transition(files).files, '.github/workflows/transitions.yml')).toMatch(
+        /^name: /,
+      );
+    });
+
+    it.each([
+      ['packages/a/src/a.spec.ts', true],
+      ['packages/a/src/a.test.ts', false],
+      ['packages/a/test/a.test.ts', true],
+      ['packages/lib/test/a.test.ts', true],
+      ['src/a.test.ts', true],
+    ])('finds tests the managed Vitest config would not run: %s', (path, found) => {
+      const files = createScriptBuilt();
+      delete (files as Record<string, unknown>).test;
+      setFile(files, path, '\n');
+
+      expect(transition(files).suggestions?.join('\n').includes('tests other than')).toBe(found);
+    });
+
+    it("doesn't switch Prettier scripts that do more than format everything", () => {
+      const files = createScriptBuilt();
+      setManifest(files, 'package.json', (manifest) => {
+        manifest.scripts = { ...manifest.scripts, format: 'prettier --write . && eslint . --fix' };
+      });
+
+      applyFiles(files, transition(files, { formatter: 'oxfmt' }).files);
+
+      expect(getFile(files, 'package.json')).toContain('prettier --write . && eslint . --fix');
+    });
+
+    it('keeps Prettier scripts next to an existing Oxfmt', () => {
+      const files = createScriptBuilt();
+      setManifest(files, 'package.json', (manifest) => {
+        manifest.devDependencies = { ...manifest.devDependencies, oxfmt: '0.79.0' };
+      });
+
+      applyFiles(files, transition(files).files);
+
+      expect(getFile(files, 'package.json')).toContain('"format": "prettier ."');
+    });
+  });
 });
+
+/**
+ * A repository like create-typescript-app's, but with packages built by scripts.
+ */
+function createScriptBuilt(): IntakeDirectory {
+  const files = createExisting({
+    description: 'An example.',
+    devDependencies: {
+      '@changesets/cli': '3.0.3',
+      '@types/node': '26.6.6',
+      '@vitest/coverage-v8': '5.1.1',
+      cspell: '10.5.2',
+      eslint: '10.15.0',
+      husky: '9.1.7',
+      prettier: '3.10.0',
+      typescript: '6.0.3',
+      vitest: '5.1.1',
+    },
+    engines: { node: '>=24' },
+    'lint-staged': { '*': 'prettier --ignore-unknown --write' },
+    packageManager: 'pnpm@12.21.0',
+    repository: { type: 'git', url: 'git+https://github.com/example-org/example.git' },
+    scripts: {
+      build: 'pnpm run -r build',
+      format: 'prettier .',
+      lint: 'eslint . --max-warnings 0',
+      'lint:spelling': 'cspell "**" ".github/**/*"',
+      test: 'vitest',
+      tsc: 'tsc -b tsconfig.build.json && tsc',
+    },
+  });
+  const texts = {
+    ...Object.fromEntries(
+      [
+        '.changeset/README.md',
+        '.github/CODE_OF_CONDUCT.md',
+        '.github/CONTRIBUTING.md',
+        '.github/DEVELOPMENT.md',
+        '.github/ISSUE_TEMPLATE/01-bug.yml',
+        '.github/ISSUE_TEMPLATE/02-documentation.yml',
+        '.github/ISSUE_TEMPLATE/03-feature.yml',
+        '.github/ISSUE_TEMPLATE/04-tooling.yml',
+        '.github/PULL_REQUEST_TEMPLATE.md',
+        '.github/SECURITY.md',
+        'LICENSE.md',
+        'README.md',
+      ].map((path) => [path, '# Example\n']),
+    ),
+    '.changeset/config.json': '{ "changelog": false }\n',
+    '.all-contributorsrc': '{ "projectName": "example" }\n',
+    '.github/actions/prepare/action.yml': `name: Prepare
+runs:
+  steps:
+    - uses: pnpm/action-setup@v6
+    - run: pnpm install --frozen-lockfile
+      shell: bash
+  using: composite
+`,
+    '.github/renovate.json': JSON.stringify({
+      $schema: '',
+      automerge: true,
+      extends: [],
+      labels: [],
+      minimumReleaseAge: '7 days',
+      postUpdateOptions: [],
+    }),
+    '.github/workflows/ci.yml': `jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/prepare
+      - run: pnpm build
+  lint_packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/prepare
+      - run: pnpm dedupe --check
+  lint_spelling:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/prepare
+      - run: pnpm lint:spelling
+  prettier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/prepare
+      - run: pnpm format --list-different
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/prepare
+      - run: pnpm build
+      - run: pnpm run test --coverage
+      - uses: codecov/codecov-action@v7
+  type_check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/prepare
+      - run: pnpm build
+      - run: pnpm tsc
+
+name: CI
+
+on:
+  pull_request: ~
+`,
+    '.github/workflows/contributors.yml':
+      'jobs:\n  contributors:\n    steps:\n      - uses: JoshuaKGoldberg/all-contributors-auto-action@v0.7.0\nname: Contributors\n',
+    '.github/workflows/octoguide.yml': 'jobs:\n  octoguide:\n    steps: []\nname: OctoGuide\n',
+    '.github/workflows/release.yml': `jobs:
+  pack:
+    steps:
+      - uses: changesets/action/pack@v2
+  publish:
+    steps:
+      - uses: changesets/action/publish@v2
+  select_mode:
+    steps:
+      - uses: changesets/action/select-mode@v2
+  version:
+    steps:
+      - uses: changesets/action/version@v2
+name: Release
+`,
+    '.gitignore': 'coverage\nnode_modules\npackages/*/lib\n',
+    '.nvmrc': '26.13.1\n',
+    '.prettierignore': 'packages/*/lib\n',
+    '.prettierrc.json': '{ "useTabs": true }\n',
+    '.vscode/extensions.json': '{ "recommendations": ["esbenp.prettier-vscode"] }\n',
+    '.vscode/launch.json': '{}\n',
+    '.vscode/settings.json':
+      '{ "editor.formatOnSave": true, "editor.rulers": [80], "typescript.tsdk": "node_modules/typescript/lib" }\n',
+    '.vscode/tasks.json': '{}\n',
+    'cspell.json':
+      '{ "dictionaries": ["node", "npm", "typescript"], "ignorePaths": [".github"], "words": ["zorbix"] }\n',
+    'eslint.config.js': 'export default [];\n',
+    'knip.json': '{}\n',
+    'packages/a/build.ts': '\n',
+    'packages/a/package.json': '{ "name": "@example/a", "scripts": { "build": "tsx build.ts" } }\n',
+    'test/a.test.ts': '\n',
+    'tsconfig.build.json': '{ "files": [], "references": [{ "path": "./packages/a" }] }\n',
+    'tsconfig.json':
+      '{ "compilerOptions": { "composite": false, "noEmit": true }, "include": ["test", "vitest.config.ts"] }\n',
+    'vitest.config.ts': "export default { test: { include: ['test/**/*.test.ts'] } };\n",
+  };
+  delete (files.packages as IntakeDirectory).a;
+  for (const [path, text] of Object.entries(texts)) {
+    setFile(files, path, text);
+  }
+  return files;
+}
+
+function getJobs(files: CreatedDirectory | IntakeDirectory | undefined, name = 'ci') {
+  const text = getFile(files, `.github/workflows/${name}.yml`) ?? '';
+  return (parseYaml(text) as { jobs: object }).jobs;
+}
+
+function removeJob(files: IntakeDirectory, id: string) {
+  const workflow = getFile(files, '.github/workflows/ci.yml') ?? '';
+  setFile(
+    files,
+    '.github/workflows/ci.yml',
+    workflow.replace(new RegExp(`  ${id}:\\n(?: {3,}.+\\n)+`), ''),
+  );
+}
 
 function setHomepage(files: IntakeDirectory, directory: string, homepage: string) {
   const pkg = JSON.parse(getFile(files, `${directory}/package.json`) ?? '{}') as Record<

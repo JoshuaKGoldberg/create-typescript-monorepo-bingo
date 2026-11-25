@@ -2,15 +2,13 @@ import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import { action } from '../../utils/actions.ts';
-import { parseJsonText, readText } from '../../utils/files.ts';
-import { formatJson, withDefaults } from '../../utils/json.ts';
+import { readText } from '../../utils/files.ts';
+import { formatJson } from '../../utils/json.ts';
 import { getWorkflowPath } from '../../utils/options.ts';
 import { formatYamlFile } from '../../utils/yaml.ts';
 
 /**
- * Owns `.all-contributorsrc` and the workflow that adds new contributors.
- * The README table is left to the All Contributors bot, so they never flip-flop.
- * Existing settings and contributors are kept.
+ * The README.md table is left to the All Contributors bot.
  */
 export const blockAllContributors = rootBase.createBlock({
   about: {
@@ -34,8 +32,9 @@ export const blockAllContributors = rootBase.createBlock({
   produce({ options, props }) {
     return {
       files: {
-        '.all-contributorsrc': formatJson(
-          withDefaults(props.existing === undefined ? undefined : parseJsonText(props.existing), {
+        '.all-contributorsrc':
+          props.existing ??
+          formatJson({
             badgeTemplate:
               '<img alt="👪 All Contributors: <%= contributors.length %>" src="https://img.shields.io/badge/%F0%9F%91%AA_all_contributors-<%= contributors.length %>-21bb42.svg" />',
             commit: false,
@@ -50,8 +49,6 @@ export const blockAllContributors = rootBase.createBlock({
             repoHost: 'https://github.com',
             repoType: 'github',
           }),
-          props.existing,
-        ),
         '.github': {
           workflows: {
             [getWorkflowPath(options, 'contributors')]: formatYamlFile(
@@ -71,7 +68,7 @@ export const blockAllContributors = rootBase.createBlock({
                     steps: [
                       {
                         uses: action('actions/checkout'),
-                        // The action commits through its token, so the checkout keeps no credentials.
+                        // The action commits through its own token
                         with: { 'fetch-depth': 0, 'persist-credentials': false },
                       },
                       { uses: '$/.github/actions/setup', with: { 'skip-checkout': true } },
@@ -86,6 +83,7 @@ export const blockAllContributors = rootBase.createBlock({
               props.existingWorkflow,
               {
                 name: `.github/workflows/contributors.${options.workflowExtension ?? 'yaml'}`,
+                sorted: options.workflowKeysSorted,
                 workflow: true,
               },
             ),

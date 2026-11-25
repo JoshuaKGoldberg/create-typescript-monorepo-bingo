@@ -16,10 +16,6 @@ import { blockPnpmWorkspace } from './blockPnpmWorkspace.ts';
 
 const dependenciesSchema = z.record(z.string(), z.string());
 
-/**
- * Owns the root, private `package.json`: scripts, devDependencies and tool settings.
- * Keys and scripts it doesn't know about are kept from the existing file.
- */
 export const blockRootPackageJson = rootBase.createBlock({
   about: {
     name: 'Root package.json',
@@ -40,10 +36,11 @@ export const blockRootPackageJson = rootBase.createBlock({
     workspace: z.string().optional(),
     properties: z.record(z.string(), z.unknown()).optional(),
     removedDevDependencies: z.array(z.string()).optional(),
+    replaced: z.record(z.string(), z.record(z.string(), z.string())).optional(),
     scripts: z.record(z.string(), z.string()).optional(),
   },
   produce({ options, props }) {
-    const existing = parseJsonText(props.existing);
+    const existing = withReplaced(parseJsonText(props.existing), props.replaced);
     const existingDevDependencies = { ...(existing.devDependencies as Dependencies | undefined) };
     for (const removed of props.removedDevDependencies ?? []) {
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
@@ -51,7 +48,6 @@ export const blockRootPackageJson = rootBase.createBlock({
     }
 
     const { catalogEntries, dependencies: resolved } = resolveDependencies(
-      // Root-only devDependencies aren't cataloged in default mode: they're declared once.
       options,
       'devDependencies',
       existingDevDependencies,
@@ -78,27 +74,23 @@ export const blockRootPackageJson = rootBase.createBlock({
           }
         : existing),
       private: true,
-      // A value that isn't an object isn't CTM's.
       ...(ownsChoices && {
         [choicesKey]: Object.keys(choices).length || hadChoices ? choices : undefined,
       }),
-      // The weekly transitions workflow infers the owner and repository from here.
+      // Transitions infer the owner and repository from here
       ...(props.existing !== undefined &&
         !existing.repository && {
           repository: { type: 'git', url: getRepositoryUrl(options) },
         }),
-      // CTM's package.json lint rules require a description.
+      // CTM's package.json lint rules require a description
       ...(props.existing !== undefined &&
         !existing.description &&
         options.description && { description: options.description }),
-      // Tool settings, like lint-staged and simple-git-hooks, only fill in what's missing.
       ...deepWithDefaults(existing, props.properties ?? {}),
-      // Existing scripts keep their order; a new file's are sorted.
       scripts: (props.existing === undefined ? sortKeys : (value: Record<string, string>) => value)(
         mergeScripts(existing.scripts as Record<string, string> | undefined, props.scripts ?? {}),
       ),
       devDependencies: sortKeys(dependencies),
-      // devEngines.packageManager is the newer way to say the same thing.
       ...(!(existing.devEngines as { packageManager?: unknown } | undefined)?.packageManager && {
         packageManager: getPackageManager(existing.packageManager, options.pnpm ?? defaults.pnpm),
       }),
@@ -112,7 +104,7 @@ export const blockRootPackageJson = rootBase.createBlock({
       suggestions:
         !ownsChoices && Object.keys(ours).length
           ? [
-              `The root package.json's ${choicesKey} isn't an object, so your choices weren't kept there. Set it to ${JSON.stringify(ours)} for later transitions to use them.`,
+              `The root package.json's ${choicesKey} isn't an object. Set it to ${JSON.stringify(ours)} for later transitions to use your options.`,
             ]
           : [],
       extensions: catalogEntries.length ? [blockPnpmWorkspace({ catalogEntries })] : [],
@@ -127,7 +119,7 @@ export const blockRootPackageJson = rootBase.createBlock({
     };
   },
   transition() {
-    // Dependencies CTM adds can leave duplicates that pnpm dedupe --check would fail on.
+    // Added dependencies can leave duplicates that pnpm dedupe --check would fail on
     return {
       scripts: [{ commands: ['pnpm install --no-frozen-lockfile', 'pnpm dedupe'], phase: 0 }],
     };
@@ -135,9 +127,23 @@ export const blockRootPackageJson = rootBase.createBlock({
 });
 
 /**
- * Gets the packageManager value. An existing pnpm at least as new as the one asked for is
- * kept exactly, including any integrity hash.
+ * Replaces entries that don't work with tooling CTM is adding.
  */
+function withReplaced(
+  existing: Record<string, unknown>,
+  replaced: Record<string, Record<string, string>> = {},
+): Record<string, unknown> {
+  return {
+    ...existing,
+    ...Object.fromEntries(
+      Object.entries(replaced).map(([key, entries]) => [
+        key,
+        { ...(existing[key] as object | undefined), ...entries },
+      ]),
+    ),
+  };
+}
+
 function getPackageManager(existing: unknown, version: string) {
   if (typeof existing === 'string' && existing.startsWith('pnpm@')) {
     const existingVersion = existing.slice('pnpm@'.length).split('+')[0] ?? '';
@@ -174,7 +180,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Packages released together with another, which must match its version.
+ * Packages that must match the version of another.
  */
 const companions: Record<string, string> = {
   '@eslint/js': 'eslint',
@@ -182,8 +188,7 @@ const companions: Record<string, string> = {
 };
 
 /**
- * When CTM adds a companion package, like `@vitest/coverage-v8`, next to a core package the
- * repository already has, like vitest, it gets the core package's version rather than CTM's.
+ * Companions to existing packages should match the repository's version, not CTM's.
  */
 function alignCompanions(
   existing: Dependencies,
@@ -192,15 +197,13 @@ function alignCompanions(
 ): Dependencies {
   const aligned = { ...resolved };
   for (const [companion, core] of Object.entries(companions)) {
-    // A core package in a catalog has its version there.
     const coreSpecifier = resolveCatalogReference(existing[core], core, workspaceText);
     if (
       companion in aligned &&
       !(companion in existing) &&
       coreSpecifier &&
       !coreSpecifier.startsWith('catalog:') &&
-      // @eslint/js isn't released with every ESLint version: within CTM's major, its own
-      // pin is one that exists.
+      // @eslint/js isn't released with every ESLint version
       !(
         companion === '@eslint/js' &&
         getMinimumVersion(core, coreSpecifier, workspaceText)?.major ===

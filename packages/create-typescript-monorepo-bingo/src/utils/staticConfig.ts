@@ -8,7 +8,6 @@ interface AstNode {
 }
 
 /**
- * A value that can be statically read from, and printed back to, a config file.
  * Regular expressions are kept as their source text.
  */
 export type StaticValue =
@@ -25,10 +24,7 @@ export interface StaticRegExp {
 }
 
 /**
- * Reads the object a config file exports by default, if it can be statically evaluated.
- * Handles `export default {...}`, `export default defineConfig({...})`,
- * and `const config = ...; export default config;`.
- * Any part that can't be evaluated (a spread, a function call, an identifier) makes it fail.
+ * Reads a config file's default export, if it doesn't have any non-static values.
  */
 export function readConfigObject(sourceText: string | undefined): StaticObject | undefined {
   const node = findConfigNode(sourceText);
@@ -37,17 +33,10 @@ export function readConfigObject(sourceText: string | undefined): StaticObject |
   return isStaticObject(value) ? value : undefined;
 }
 
-/**
- * Whether a source file has any comments.
- */
 export function hasComments(sourceText: string): boolean {
   return parseSync('config.ts', sourceText).comments.length > 0;
 }
 
-/**
- * Reads the layout of the object a config file exports by default.
- * @see readConfigObject
- */
 export function readConfigLayout(sourceText: string | undefined): Layout | undefined {
   const node = findConfigNode(sourceText);
   return node && sourceText !== undefined
@@ -80,32 +69,20 @@ function findConfigNode(sourceText: string | undefined): AstNode | undefined {
 export type StaticObject = Record<string, StaticValue>;
 
 export interface ESLintIgnoresSource {
-  /**
-   * The array's source between its brackets, with every entry and comment as written.
-   */
   inner: string;
 
   /**
-   * Where, in `inner`, new entries go: after the last existing entry and any comment on
-   * the rest of its line.
+   * Position in `inner` after the last existing entry and any comment on its line.
    */
   insertAt: number;
 
   /**
-   * Where, in `inner`, the last existing entry needs a comma, if it has none.
+   * Position in `inner` for the last existing entry's missing comma, if any.
    */
   needsCommaAt?: number;
-
-  /**
-   * The string literal entries.
-   */
   values: string[];
 }
 
-/**
- * Reads a flat ESLint config's global ignores, along with their source lines,
- * so comments between entries can be kept.
- */
 export function readESLintIgnoresWithSource(
   sourceText: string | undefined,
 ): ESLintIgnoresSource | undefined {
@@ -120,7 +97,7 @@ export function readESLintIgnoresWithSource(
 
   let found: ESLintIgnoresSource | undefined;
 
-  // Only the config's own entries count, not ignores-only objects elsewhere in the file.
+  // Other objects in the file may also have ignores
   const entries = new Set<unknown>(getConfigArgs(program.body as unknown as SpannedNode[]));
 
   visit(program, (node) => {
@@ -174,9 +151,6 @@ export function readESLintIgnoresWithSource(
   return found;
 }
 
-/**
- * Prints a static value as a TypeScript expression, keeping an existing layout.
- */
 export function printStatic(value: StaticValue, layout?: Layout): string {
   return printValue(value, { layout, style: 'ts' });
 }
@@ -282,7 +256,7 @@ function resolveIdentifier(body: AstNode[], node: AstNode): AstNode | undefined 
 }
 
 function unwrapCalls(node: AstNode): AstNode {
-  // defineConfig({...}) and similar single-argument wrappers.
+  // defineConfig({...}) and similar wrappers
   if (node.type === 'CallExpression') {
     const args = node.arguments as AstNode[];
     if (args.length === 1 && args[0]) {
@@ -322,51 +296,25 @@ function visit(node: unknown, callback: (node: AstNode) => void) {
 }
 
 export interface ESLintExtras {
-  /**
-   * Config array entries CTM doesn't produce, as source text with their comments.
-   */
   configs: string[];
-
-  /**
-   * Comments at the start of the file, such as a TypeScript check directive.
-   */
   header: string[];
-
-  /**
-   * Import declarations that aren't exactly one of CTM's, as source text.
-   */
   imports: string[];
-
-  /**
-   * Comments directly above \`export default\`.
-   */
   exportComments: string[];
 
   /**
-   * Modules whose CTM import is replaced by the repository's own import of them,
-   * because it declares the same name (for example, adding `globalIgnores`).
+   * Modules whose imports by CTM would conflict with the repository's own.
    */
   replacedImports: string[];
-
-  /**
-   * Other top-level statements, such as variables the extra configs use, as source text.
-   */
   statements: string[];
-
-  /**
-   * Comments after the last config entry.
-   */
   trailing: string[];
 }
 
 type SpannedNode = AstNode & { end: number; start: number };
 
 /**
- * Finds what a repository added to a flat ESLint config made by CTM. CTM's own entries are
- * matched by their `files`, keys and first extended config, at most once each; every other entry, import and
- * top-level statement is kept, along with comments before them. Entries and imports in
- * `dropped`, which CTM no longer writes, are removed only when their text matches exactly,
- * and imports only when nothing kept still uses them.
+ * Finds what a repository added to CTM's ESLint config, including comments.
+ *
+ * Configs and imports in `dropped` are removed if their text matches, except for used imports.
  */
 export function readESLintExtras(
   sourceText: string | undefined,
@@ -410,12 +358,11 @@ export function readESLintExtras(
   const statements: string[] = [];
   const exportComments: string[] = [];
   const declaredNames = new Set<string>();
-  // Names that kept statements and entries refer to, for deciding on dropped imports.
   const referenced = new Set<string>();
   let previousStatementEnd = firstStart;
 
   for (const node of body) {
-    // Comments directly above a statement, like @ts-expect-error, stay with it.
+    // Comments directly above a statement, such as @ts-expect-error, stay with it
     const comments = getComments(sourceText.slice(previousStatementEnd, node.start));
     previousStatementEnd = node.end;
     const text = [...comments, sourceText.slice(node.start, node.end)].join('\n');
@@ -423,7 +370,6 @@ export function readESLintExtras(
     if (node.type === 'ImportDeclaration') {
       const normalized = normalize(sourceText.slice(node.start, node.end));
       if (droppedImports.has(normalized)) {
-        // Decided once the kept entries are known, since one may still use it.
         pendingImports.push({ names: getImportedNames(node), text });
       } else if (!ownImports.has(normalized)) {
         imports.push(text);
@@ -456,7 +402,6 @@ export function readESLintExtras(
       continue;
     }
 
-    // An entry CTM named as its own, which CTM no longer writes, is dropped.
     if (index === -1 && dropped?.namePrefix && getEntryName(arg)?.startsWith(dropped.namePrefix)) {
       continue;
     }
@@ -475,7 +420,6 @@ export function readESLintExtras(
     }
   }
 
-  // Comments after the last entry, before the closing parenthesis or bracket.
   const container = getConfigContainer(body);
   const trailing =
     container && args.length ? getComments(sourceText.slice(previousEnd, container.end - 1)) : [];
@@ -493,8 +437,7 @@ const keyedTypes = new Set([
 ]);
 
 /**
- * Collects the identifiers a node refers to, leaving out property names and object keys,
- * which aren't references, and strings and comments, which aren't in the AST.
+ * Collects identifiers a node refers to, excluding property names and object keys.
  */
 function collectReferences(node: unknown, names: Set<string>, binding = false): void {
   if (Array.isArray(node)) {
@@ -510,7 +453,7 @@ function collectReferences(node: unknown, names: Set<string>, binding = false): 
 
   const current = node as AstNode;
   if (current.type === 'Identifier') {
-    // A declared name isn't a reference, but its type annotation may hold some.
+    // Type annotations on declared names may hold references
     if (!binding) {
       names.add(current.name as string);
     }
@@ -527,8 +470,7 @@ function collectReferences(node: unknown, names: Set<string>, binding = false): 
       continue;
     }
 
-    // Declared names, like a variable's, a function's or its parameters', are bindings:
-    // only what's inside them, like defaults and computed keys, can be references.
+    // Bindings can still contain references, such as in defaults and computed keys
     const declares = key === 'id' || key === 'params' || (binding && key !== 'right');
     collectReferences(
       value,
@@ -556,9 +498,6 @@ function getImportedNames(node: AstNode): string[] {
   );
 }
 
-/**
- * Whether a config file's source parses.
- */
 export function isParseable(sourceText: string): boolean {
   return !parseSync('config.ts', sourceText).errors.length;
 }
@@ -575,9 +514,6 @@ function normalize(text: string) {
   return text.replaceAll(/\s+/g, ' ').replaceAll('"', "'").replace(/;$/, '').trim();
 }
 
-/**
- * Normalizes code for comparison, ignoring whitespace, quotes and trailing commas.
- */
 function normalizeCode(text: string) {
   return normalize(text)
     .replaceAll(/,(\s*[}\]])/g, '$1')
@@ -629,7 +565,7 @@ function getConfigArgs(body: SpannedNode[]): SpannedNode[] {
 }
 
 /**
- * Identifies a flat config entry by its `files` and the keys it has.
+ * Identifies a flat config entry by its `files`, keys, and first extended config.
  */
 function getESLintConfigSignature(node: AstNode): string {
   if (node.type !== 'ObjectExpression') {
@@ -646,8 +582,7 @@ function getESLintConfigSignature(node: AstNode): string {
     )
     .sort();
 
-  // The first extended config's root, like vitest or jest, tells apart entries for the
-  // same files, such as another test runner's entry for test files.
+  // Different test runners may have entries for the same files
   const extendsProperty = properties.find(
     (property) => property.type === 'Property' && getKeyName(property.key as AstNode) === 'extends',
   );

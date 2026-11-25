@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import { defaults } from '../../options.ts';
-import { action } from '../../utils/actions.ts';
+import { action, createSetupSteps } from '../../utils/actions.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatJson } from '../../utils/json.ts';
 import { getWorkflowPath } from '../../utils/options.ts';
@@ -22,11 +22,6 @@ We have a quick list of common questions to get you started engaging with this p
 [our documentation](https://github.com/changesets/changesets/blob/main/docs/common-questions.md)
 `;
 
-/**
- * Owns Changesets with independent versions, and the five-job release workflow:
- * select_mode, then either version, or pack and publish, then comment.
- * Release tokens come from a GitHub App; npm publishing uses trusted publishing (OIDC).
- */
 export const blockChangesets = rootBase.createBlock({
   about: {
     name: 'Changesets',
@@ -59,18 +54,16 @@ export const blockChangesets = rootBase.createBlock({
     fixed: z.array(z.array(z.string())).optional(),
   },
   produce({ options, props }) {
-    // A repository that releases with another tool keeps it.
     if (props.otherReleaseTool) {
       return {
         suggestions: [
-          `This repository releases with ${props.otherReleaseTool}, so create-typescript-monorepo-bingo's Changesets release workflow wasn't added.`,
+          `A Changesets release workflow wasn't added because this repository releases with ${props.otherReleaseTool}.`,
         ],
       };
     }
 
     const app = options.releaseApp ?? defaults.releaseApp;
-    // An existing config is the repository's, including settings CTM would choose
-    // differently, like privatePackages, which decides whether private packages get versions.
+    // Existing configs may intentionally differ, such as in privatePackages
     const config =
       props.existingConfig === undefined
         ? {
@@ -101,10 +94,7 @@ export const blockChangesets = rootBase.createBlock({
       },
     });
 
-    const setup = (inputs?: Record<string, unknown>) => ({
-      uses: '$/.github/actions/setup',
-      ...(inputs && { with: inputs }),
-    });
+    const setup = (inputs?: Record<string, unknown>) => createSetupSteps(options, inputs);
 
     const workflow = {
       name: 'Release',
@@ -122,7 +112,7 @@ export const blockChangesets = rootBase.createBlock({
             'publish-plan-artifact-id': '${{ steps.select_mode.outputs.publish-plan-artifact-id }}',
           },
           steps: [
-            setup(),
+            ...setup(),
             { uses: action('changesets/action', '/select-mode'), id: 'select_mode' },
           ],
         },
@@ -133,7 +123,7 @@ export const blockChangesets = rootBase.createBlock({
           'runs-on': 'ubuntu-latest',
           permissions: { contents: 'read' },
           steps: [
-            setup(),
+            ...setup(),
             appToken({ 'permission-contents': 'write', 'permission-pull-requests': 'write' }),
             {
               name: 'Version Packages',
@@ -152,11 +142,10 @@ export const blockChangesets = rootBase.createBlock({
             'pack-dir-artifact-id': '${{ steps.pack.outputs.pack-dir-artifact-id }}',
           },
           steps: [
-            setup({ cache: false }),
+            ...setup({ cache: false }),
             ...(options.packages?.some((pkg) => pkg.scripts?.includes('prebuild'))
               ? [{ name: 'Prebuild', run: 'pnpm run -r prebuild' }]
               : []),
-            // CTM's build package gives tsdown-built packages a root build script.
             ...(props.rootBuild ||
             (!options.buildPackageSkipped &&
               options.packages?.some((pkg) => pkg.kind === 'library'))
@@ -183,8 +172,8 @@ export const blockChangesets = rootBase.createBlock({
             'published-packages': "${{ steps.publish.outputs['published-packages'] }}",
           },
           steps: [
-            // No dependency cache in the one job that holds an OIDC token and a release token.
-            setup({ cache: false }),
+            // No dependency cache in the one job that holds both OIDC and release tokens
+            ...setup({ cache: false }),
             appToken({ 'permission-contents': 'write' }),
             {
               name: 'Publish Packages',
@@ -225,7 +214,7 @@ export const blockChangesets = rootBase.createBlock({
           words: ['marcalexiei', ...app.split('_').filter((word) => /^[A-Z]+$/.test(word))],
         }),
         blockRootPackageJson({
-          // The GitHub changelog only where the config uses it, or Knip reports it unused.
+          // Knip would report the GitHub changelog as unused if the config doesn't use it
           devDependencies: pinned(
             ...(JSON.stringify(config.changelog ?? null).includes('@changesets/changelog-github')
               ? (['@changesets/changelog-github'] as const)
@@ -246,6 +235,7 @@ export const blockChangesets = rootBase.createBlock({
               props.existingWorkflow,
               {
                 name: `.github/workflows/release.${options.workflowExtension ?? 'yaml'}`,
+                sorted: options.workflowKeysSorted,
                 workflow: true,
               },
             ),
@@ -256,9 +246,6 @@ export const blockChangesets = rootBase.createBlock({
   },
 });
 
-/**
- * Finds a release tool other than Changesets, which a repository keeps instead.
- */
 function findOtherReleaseTool(
   files: IntakeDirectory,
   changesetConfig: string | undefined,
@@ -285,8 +272,7 @@ function findOtherReleaseTool(
     return 'nx release';
   }
 
-  // CTM's release workflow uses changesets/action's sub-actions; a workflow without them,
-  // including one using the classic all-in-one changesets/action, is the repository's own.
+  // Workflows without CTM's sub-actions are the repository's own
   return releaseWorkflow !== undefined && !releaseWorkflow.includes('changesets/action/select-mode')
     ? 'its own release workflow'
     : undefined;

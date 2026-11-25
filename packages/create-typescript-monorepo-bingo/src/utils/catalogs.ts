@@ -13,14 +13,9 @@ export type DependencyField = (typeof dependencyFields)[number];
 export type Dependencies = Record<string, string>;
 
 /**
- * One catalog entry, forwarded from wherever a dependency is declared to the
- * pnpm workspace Block. These travel as an array of records, never a
- * `{ dependency: specifier }` map, because Stratum throws on mismatched map values.
+ * Entries are passed in arrays because Stratum throws on mismatched object values.
  */
 export interface CatalogEntry {
-  /**
-   * Catalog name; `default` for the default catalog.
-   */
   catalog: string;
   dependency: string;
   specifier: string;
@@ -32,9 +27,6 @@ const namedCatalogsByField: Partial<Record<DependencyField, string>> = {
   peerDependencies: 'peer',
 };
 
-/**
- * Gets which catalog a dependency in a field should be written to, if any.
- */
 function getCatalogFor(
   options: RootOptions,
   field: DependencyField,
@@ -58,16 +50,10 @@ function getCatalogFor(
   }
 }
 
-/**
- * Gets the `catalog:` specifier for a catalog name.
- */
 function getCatalogSpecifier(catalog: string): string {
   return catalog === 'default' ? 'catalog:' : `catalog:${catalog}`;
 }
 
-/**
- * Gets the catalog name a `catalog:` specifier refers to.
- */
 function getCatalogName(specifier: string): string {
   return specifier.slice('catalog:'.length) || 'default';
 }
@@ -78,12 +64,7 @@ export interface ResolvedDependencies {
 }
 
 /**
- * Merges the dependencies CTM wants in a field with what's on disk, applying catalogs.
- * - Existing specifiers are kept unless CTM's pin is newer (see {@link resolveSpecifier}).
- * - Existing `catalog:` specifiers are kept, and CTM's pin is forwarded to the catalog.
- * - In catalog modes, eligible literal specifiers move into their catalog.
- *   `catalogField` overrides which field's catalog that is, for packages like the
- *   build package whose runtime dependencies are really development tools.
+ * `catalogField` is for the build package, whose dependencies are development tools.
  */
 export function resolveDependencies(
   options: RootOptions,

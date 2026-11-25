@@ -7,9 +7,6 @@ import { getWorkflowPath } from '../../utils/options.ts';
 import { formatYamlFile } from '../../utils/yaml.ts';
 import { blockCSpell } from './blockCSpell.ts';
 
-/**
- * Owns the OctoGuide workflow, which checks PR titles against Conventional Commits.
- */
 export const blockOctoGuide = rootBase.createBlock({
   about: {
     name: 'OctoGuide',
@@ -23,7 +20,6 @@ export const blockOctoGuide = rootBase.createBlock({
   },
   produce({ options, props }) {
     return {
-      // The words CTM's workflow uses, when CTM writes it.
       extensions:
         props.existing === undefined
           ? [blockCSpell({ words: ['autorelease', 'octoguide', 'zizmor'] })]
@@ -58,6 +54,7 @@ export const blockOctoGuide = rootBase.createBlock({
                 props.existing,
                 {
                   name: `.github/workflows/octoguide.${options.workflowExtension ?? 'yaml'}`,
+                  sorted: options.workflowKeysSorted,
                   workflow: true,
                 },
               ),
@@ -70,8 +67,7 @@ export const blockOctoGuide = rootBase.createBlock({
 });
 
 /**
- * OctoGuide only reads pull request metadata and never checks out its code, so
- * pull_request_target is safe here; this tells zizmor so.
+ * The pull_request_target trigger is safe because OctoGuide never checks out code.
  */
 function allowTrigger(workflow: string) {
   return workflow.replace(

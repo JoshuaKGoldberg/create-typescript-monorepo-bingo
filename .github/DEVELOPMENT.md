@@ -3,17 +3,16 @@
 After [forking the repo from GitHub](https://help.github.com/articles/fork-a-repo) and [installing pnpm](https://pnpm.io/installation):
 
 ```shell
-git clone https://github.com/<your-name-here>/create-typescript-monorepo-bingo
+git clone https://github.com/(your-name-here)/create-typescript-monorepo-bingo
 cd create-typescript-monorepo-bingo
 pnpm install
 ```
 
-This repository is a pnpm workspace monorepo.
-Each package lives under `packages/`, and shared build configuration lives in `packages/build`.
+Each package is under `packages/`, with shared build configuration in `packages/build`.
 
 ## Building
 
-Run [tsdown](https://tsdown.dev) in workspace mode to build every package's `src/` into `dist/`:
+Run [**tsdown**](https://tsdown.dev) to build each package's `src/` into `dist/`:
 
 ```shell
 pnpm build
@@ -32,13 +31,13 @@ pnpm format --write
 
 ## Linting
 
-[ESLint](https://eslint.org) is used with [typescript-eslint](https://typescript-eslint.io) to lint JavaScript, TypeScript, JSON, YAML and Markdown files:
+[ESLint](https://eslint.org) is used with [typescript-eslint](https://typescript-eslint.io) to lint source files:
 
 ```shell
 pnpm lint
 ```
 
-Other linters include [cspell](https://cspell.org) for spelling and [Knip](https://knip.dev) for unused files, dependencies and exports:
+Other linters include [CSpell](https://cspell.org) for spelling and [Knip](https://knip.dev) for unused files, dependencies, and code exports:
 
 ```shell
 pnpm lint:spelling
@@ -47,7 +46,7 @@ pnpm knip
 
 ## Testing
 
-[Vitest](https://vitest.dev) is used for tests, with one project per package:
+[Vitest](https://vitest.dev) is used for tests:
 
 ```shell
 pnpm test
@@ -55,15 +54,23 @@ pnpm test
 
 Add the `--coverage` flag to compute test coverage and place reports in the `coverage/` directory.
 
+### End-to-End Tests
+
+Run end-to-end tests to create repositories with the template and run CI checks in them:
+
+```shell
+pnpm e2e
+```
+
 ## Type Checking
 
-TypeScript 7 runs type checking across every package's project references:
+Run the [TypeScript](https://typescriptlang.org) command-line to type check all packages:
 
 ```shell
 pnpm typecheck
 ```
 
-The `typescript` dependency is aliased to TypeScript 6 for tools that use TypeScript's JavaScript API, such as typescript-eslint and tsdown's declaration generator.
+The `typescript` dependency is aliased to TypeScript 6 for tools that use its JavaScript API.
 
 ## Releasing
 
@@ -73,3 +80,5 @@ Add a changeset describing your change with:
 ```shell
 pnpm changeset
 ```
+
+The release workflow will send a _"Version Packages"_ PR, then publish once it's merged.

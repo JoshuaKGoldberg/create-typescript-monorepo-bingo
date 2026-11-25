@@ -11,14 +11,14 @@ import {
   withoutAlternate,
 } from '../../utils/files.ts';
 import { formatJson } from '../../utils/json.ts';
-import { compareCaseInsensitive, mergeList } from '../../utils/lists.ts';
-import { getPackageGlobs } from '../../utils/options.ts';
+import { compareCaseInsensitive, compareCodeUnits, mergeList } from '../../utils/lists.ts';
+import { getLibraryPackages, getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import { blockGitHubActionsCI } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 import { blockVSCode } from './blockVSCode.ts';
 
-// .github isn't ignored: cspell skips ignored paths even when they're passed explicitly.
+// .github isn't included because CSpell skips ignored paths even when passed explicitly
 const baseIgnorePaths = [
   '*.tsbuildinfo',
   'CHANGELOG.md',
@@ -27,9 +27,6 @@ const baseIgnorePaths = [
   'pnpm-lock.yaml',
 ];
 
-/**
- * Owns `cspell.json`. Existing words, ignore paths and settings are kept.
- */
 export const blockCSpell = rootBase.createBlock({
   about: {
     name: 'CSpell',
@@ -45,7 +42,6 @@ export const blockCSpell = rootBase.createBlock({
     return {
       ...(alternate && { alternate }),
       ...(existing !== undefined && { existing }),
-      // A repository that has a cspell.json but doesn't run cspell uses it for editors only.
       ...(existing !== undefined && !runsCSpell(files, scripts) && { editorOnly: true }),
     };
   },
@@ -79,7 +75,6 @@ export const blockCSpell = rootBase.createBlock({
             }),
             blockVSCode({ extensions: ['streetsidesoftware.code-spell-checker'] }),
           ],
-      // A cspell.json that only editors use is left as it is.
       files: props.editorOnly
         ? {}
         : {
@@ -87,13 +82,17 @@ export const blockCSpell = rootBase.createBlock({
               {
                 ...existing,
                 dictionaries: mergeList(list('dictionaries'), ['node', 'npm', 'typescript']),
-                ignorePaths: mergeList(list('ignorePaths'), [
-                  ...baseIgnorePaths,
-                  ...getPackageGlobs(options, 'dist'),
-                  ...getPackageGlobs(options, 'lib'),
-                  ...(props.ignorePaths ?? []),
-                ]),
-                // The words CTM adds come from its workflows, which an ignored .github skips.
+                ignorePaths: mergeList(
+                  list('ignorePaths'),
+                  [
+                    ...baseIgnorePaths,
+                    ...(props.existing === undefined || getLibraryPackages(options).length
+                      ? [...getPackageGlobs(options, 'dist'), ...getPackageGlobs(options, 'lib')]
+                      : []),
+                    ...(props.ignorePaths ?? []),
+                  ],
+                  compareCodeUnits,
+                ),
                 words: mergeList(
                   list('words'),
                   [
@@ -114,19 +113,17 @@ export const blockCSpell = rootBase.createBlock({
 });
 
 /**
- * Gets words from names CTM writes into files, like the owner in LICENSE.md, authors and
- * the title in READMEs,
- * which may not be dictionary words. An existing cspell.json already passes for the
- * repository's names, so it only gets a new package's.
+ * Gets words from names written to files, such as the owner in LICENSE.md.
  */
 function getNameWords(options: RootOptions, isNew: boolean): string[] {
   const names = [
     ...(isNew
       ? [options.owner, options.author, options.repository, options.scope, options.title]
       : []),
-    options.newPackage,
+    // Existing packages already use their scope
+    isUsedScope(options) ? options.newPackage?.split('/')[1] : options.newPackage,
   ];
-  // cspell skips words shorter than four letters.
+  // CSpell skips words shorter than four letters
   return [
     ...new Set(
       names
@@ -137,9 +134,16 @@ function getNameWords(options: RootOptions, isNew: boolean): string[] {
   ];
 }
 
-/**
- * Whether a repository runs cspell, from its scripts, lint-staged or workflows.
- */
+function isUsedScope({ newPackage, packages }: RootOptions) {
+  const scope = /^@[^/]+\//.exec(newPackage ?? '')?.[0];
+  return (
+    scope !== undefined &&
+    !!packages?.some(
+      (pkg) => pkg.kind !== 'build' && pkg.name !== newPackage && pkg.name.startsWith(scope),
+    )
+  );
+}
+
 function runsCSpell(files: IntakeDirectory, scripts: string[]) {
   const workflows = Object.values(getDirectory(files, '.github/workflows') ?? {});
   return (

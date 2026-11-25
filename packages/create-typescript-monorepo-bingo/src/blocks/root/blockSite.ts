@@ -6,11 +6,6 @@ import { blockESLint } from './blockESLint.ts';
 import { blockGitHubActionsCI } from './blockGitHubActionsCI.ts';
 import { blockVitest } from './blockVitest.ts';
 
-/**
- * Connects repo-owned docs site packages, such as an Astro Starlight site, to the
- * root tooling: a CI job that builds each site, its prebuild in the lint job, and
- * Vitest coverage excludes. The site's own files stay repo-owned.
- */
 export const blockSite = rootBase.createBlock({
   about: {
     name: 'Site',
@@ -46,8 +41,7 @@ export const blockSite = rootBase.createBlock({
           jobs: sites
             .filter((site) => site.scripts?.includes('build'))
             .map((site, index) => {
-              // A site may import workspace packages' build output, which a fresh checkout
-              // doesn't have: the ... filter builds them first.
+              // The ... filter builds workspace packages the site may import
               const command = `pnpm --filter=${site.name}... build`;
               const rootScript = findRootScript(command);
               return {

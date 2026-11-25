@@ -2,18 +2,12 @@ import semver from 'semver';
 import { type Document, isMap, isNode, isScalar, isSeq, parseDocument, stringify } from 'yaml';
 
 import { annotateActionVersions } from './actions.ts';
+import { sortKeysDeep } from './json.ts';
 
-/**
- * Stringifies a value as YAML in the style oxfmt and Prettier use.
- */
 export function formatYaml(value: unknown): string {
   return annotateActionVersions(stringify(value, { lineWidth: 0, singleQuote: true }));
 }
 
-/**
- * Stringifies a GitHub Actions workflow, with blank lines between top-level keys
- * and between jobs, as hand-written workflows usually have.
- */
 export function formatWorkflow(value: unknown): string {
   const lines = formatYaml(value).trimEnd().split('\n');
   const output: string[] = [];
@@ -38,13 +32,8 @@ export function formatWorkflow(value: unknown): string {
 }
 
 /**
- * Formats a YAML file CTM produces.
- * - A new file is printed fresh: as a workflow, with blank lines, if `workflow` is set.
- * - An existing workflow is the repository's: CTM only adds jobs it doesn't find
- *   (matching ids that differ only in `-` vs `_`), and keeps the Node.js versions
- *   matrix of jobs it does find in line with `engines.node`. Nothing else changes, so
- *   comments, settings, steps and formatting are all kept.
- * - Any other existing YAML file is kept as it is.
+ * Existing workflows only receive missing jobs and updated Node.js version matrices.
+ * Other existing files are kept as they are.
  * @throws If an existing file can't be parsed.
  */
 export function formatYamlFile(
@@ -54,14 +43,20 @@ export function formatYamlFile(
     name,
     nodeEngines,
     scripts = {},
+    sorted = false,
     workflow = false,
   }: {
     name?: string;
     nodeEngines?: string;
     scripts?: Record<string, string>;
+    sorted?: boolean;
     workflow?: boolean;
   } = {},
 ): string {
+  if (sorted) {
+    value = sortKeysDeep(value);
+  }
+
   if (existingText === undefined) {
     return workflow ? formatWorkflow(value) : formatYaml(value);
   }
@@ -85,7 +80,7 @@ export function formatYamlFile(
   const spaced = jobs.items.slice(1).some((pair) => isNode(pair.key) && pair.key.spaceBefore);
   let changed = false;
 
-  for (const [id, job] of Object.entries(value.jobs)) {
+  for (const [id, job] of sortByNeeds(value.jobs)) {
     const existing = jobs.items.find(
       (pair) => normalizeJobId(keyText(pair.key)) === normalizeJobId(id),
     );
@@ -95,17 +90,27 @@ export function formatYamlFile(
       continue;
     }
 
-    // A job that does the same thing under another id, like typecheck for type_check,
-    // or another job running the same action, is the repository's version of it.
-    if (hasEquivalentJob(document.toJS() as unknown, job, scripts)) {
+    // Equivalent jobs may have different ids
+    const currentJobs = getPath(document.toJS() as Record<string, unknown>, ['jobs']);
+    const existingJobs = isPlainObject(currentJobs) ? currentJobs : {};
+    if (hasEquivalentJob(existingJobs, job, scripts) || !hasNeeds(existingJobs, job)) {
       continue;
     }
 
     const created = document.createPair(id, job);
-    if (spaced && isNode(created.key)) {
-      created.key.spaceBefore = true;
+    const index = sorted ? jobs.items.findIndex((pair) => keyText(pair.key) > id) : -1;
+    const next = jobs.items.at(index);
+    if (index === 0 && next && isNode(next.key) && jobs.commentBefore) {
+      next.key.commentBefore = jobs.commentBefore;
+      jobs.commentBefore = undefined;
     }
-    jobs.items.push(created);
+    jobs.items.splice(index === -1 ? jobs.items.length : index, 0, created);
+    if (spaced && isNode(created.key)) {
+      created.key.spaceBefore = index !== 0;
+      if (index === 0 && next && isNode(next.key)) {
+        next.key.spaceBefore = true;
+      }
+    }
     changed = true;
   }
 
@@ -119,8 +124,7 @@ export function formatYamlFile(
 }
 
 /**
- * Updates an existing job's `strategy.matrix.node-version` list to CTM's, which follows
- * `engines.node`. Other matrices, and versions written as expressions, are kept.
+ * Other matrices, and versions written as expressions, are kept.
  */
 function syncNodeVersions(
   document: Document,
@@ -140,8 +144,6 @@ function syncNodeVersions(
     return false;
   }
 
-  // Existing versions that engines.node still allows are kept; ones it doesn't are
-  // removed, and CTM's own are added.
   const kept = existing.items.filter(
     (item) =>
       !isScalar(item) || nodeEngines === undefined || allowsNodeVersion(nodeEngines, item.value),
@@ -153,12 +155,11 @@ function syncNodeVersions(
     return false;
   }
 
-  // New versions go in ascending position among the kept ones, so sorted lists stay sorted.
+  // Sorted lists should stay sorted
   const items = [...kept];
   for (const version of added) {
     const target = semver.coerce(String(version));
-    // Before the first larger entry, or before its own major (like 22.22.2 before 22),
-    // matching the minimum-then-major order CTM writes.
+    // CTM writes minimum versions before their majors
     const index = items.findIndex((item) => {
       const value = isScalar(item) ? String(item.value) : '';
       const current = semver.coerce(value);
@@ -186,12 +187,42 @@ function normalizeJobId(id: string) {
   return id.toLowerCase().replaceAll(/[-_]/g, '');
 }
 
-function hasEquivalentJob(workflow: unknown, job: unknown, scripts: Record<string, string>) {
-  const existingJobs = isPlainObject(workflow) && isPlainObject(workflow.jobs) ? workflow.jobs : {};
+function sortByNeeds(jobs: Record<string, unknown>) {
+  const depth = (id: string): number => {
+    const job = jobs[id];
+    const needs = (isPlainObject(job) ? [job.needs ?? []].flat() : []) as string[];
+    return Math.max(0, ...needs.map((need) => depth(need) + 1));
+  };
+  return Object.entries(jobs).sort(([a], [b]) => depth(a) - depth(b));
+}
+
+/**
+ * Existing jobs might not have the ids or outputs that CTM's versions of them do.
+ */
+function hasNeeds(jobs: Record<string, unknown>, job: unknown) {
+  const needs = (isPlainObject(job) ? [job.needs ?? []].flat() : []) as string[];
+  const outputs = JSON.stringify(job).matchAll(/\bneeds\.(\w+)\.outputs(?:\.|\[')([\w-]+)/g);
+  return (
+    needs.every((id) => getPath(jobs, [id]) !== undefined) &&
+    [...outputs].every(
+      ([, id = '', output = '']) => getPath(jobs, [id, 'outputs', output]) !== undefined,
+    )
+  );
+}
+
+function hasEquivalentJob(
+  existingJobs: Record<string, unknown>,
+  job: unknown,
+  scripts: Record<string, string>,
+) {
   const ours = getSteps(job);
   const actions = ours.flatMap((step) => (step.uses ? [normalizeUses(step.uses)] : []));
   const distinctive = actions.filter(
-    (uses) => !uses.startsWith('$/') && !uses.startsWith('./') && uses !== 'actions/checkout',
+    (uses) =>
+      !uses.startsWith('$/') &&
+      !uses.startsWith('./') &&
+      uses !== 'actions/checkout' &&
+      uses !== 'actions/create-github-app-token',
   );
   const runs = ours.flatMap((step) => (step.run ? [normalizeRun(step.run, scripts)] : []));
 
@@ -209,14 +240,23 @@ function hasEquivalentJob(workflow: unknown, job: unknown, scripts: Record<strin
     );
     return (
       (distinctive.length > 0 && distinctive.every((uses) => existingActions.has(uses))) ||
-      (runs.length > 0 && runs.every((run) => existingRuns.has(run)))
+      (runs.length > 0 && runs.every((run) => existingRuns.has(run))) ||
+      // Tests that need other steps first, such as a build, would fail in CTM's job
+      (runs.length > 0 &&
+        hasPreparation(steps, scripts) &&
+        runs.every(
+          (run) =>
+            run.startsWith('vitest') &&
+            [...existingRuns].some(
+              (existing) => withoutVitestArgs(existing) === withoutVitestArgs(run),
+            ),
+        ))
     );
   });
 }
 
 /**
- * Expands a run's matrix references, so `pnpm ${{ matrix.task }}` with a task matrix of
- * typecheck and lint counts as running `pnpm typecheck` and `pnpm lint`.
+ * A `pnpm ${{ matrix.task }}` with a task matrix counts as running each of the tasks.
  */
 function expandMatrix(run: string, job: unknown): string[] {
   const strategy = isPlainObject(job) && isPlainObject(job.strategy) ? job.strategy : {};
@@ -237,7 +277,7 @@ function getSteps(job: unknown): { run?: string; uses?: string }[] {
 }
 
 /**
- * Flattens steps, including ones nested in groups like `parallel:`.
+ * Steps may be nested in groups such as `parallel:`.
  */
 function flattenSteps(steps: unknown[]): { run?: string; uses?: string }[] {
   return steps.flatMap((step) => {
@@ -256,20 +296,50 @@ function normalizeUses(uses: string) {
 }
 
 /**
- * Normalizes a command, expanding a pnpm script to what it runs, so `pnpm typecheck`
- * and `pnpm exec tsc -b` compare equal when the typecheck script is `tsc -b`.
+ * Expands pnpm scripts so that equivalent commands compare equal.
  */
 function normalizeRun(run: string, scripts: Record<string, string>): string {
   const command = run
     .trim()
     .replace(/^(?:pnpm (?:run |exec )?|npx )/, '')
-    // A filter with its dependencies, like --filter=site..., runs the same package's script.
+    // Filters with dependencies, such as --filter=site..., run the same package's script
     .replaceAll(/(--filter[= ]\S+?)\.\.\.(?=\s|$)/g, '$1');
   const [name = '', ...args] = command.split(/\s+/);
   const script = scripts[name];
   return script && script !== command
     ? normalizeRun([script, ...args].join(' '), {})
-    : command.replaceAll(/\s+/g, ' ');
+    : normalizePrettier(command.replaceAll(/\s+/g, ' '));
+}
+
+function normalizePrettier(command: string) {
+  const [name = '', ...args] = command.split(' ');
+  return /^prettier(?:@|$)/.test(name)
+    ? [
+        'prettier',
+        ...args
+          .filter((arg) => !/^(?:-u|--ignore-unknown)$/.test(arg))
+          .map((arg) => (/^(?:-c|-l|--list-different)$/.test(arg) ? '--check' : arg))
+          .sort(),
+      ].join(' ')
+    : command;
+}
+
+/**
+ * Whether a job runs anything other than installs before its tests.
+ */
+function hasPreparation(steps: { run?: string }[], scripts: Record<string, string>) {
+  const runs = steps.flatMap((step) => (step.run ? [normalizeRun(step.run, scripts)] : []));
+  const test = runs.findIndex((run) => run.startsWith('vitest'));
+  return runs
+    .slice(0, test)
+    .some((run) => !/^(?:(?:pnpm )?(?:i|install)(?: -\S+)*|corepack [^&;|]*)$/.test(run));
+}
+
+function withoutVitestArgs(command: string) {
+  return command
+    .replaceAll(/\$\{\{.*?\}\}/g, '')
+    .replaceAll(/ (?:run|--run|--coverage)(?= |$)/g, '')
+    .trim();
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -280,10 +350,6 @@ function keyText(key: unknown) {
   return isScalar(key) ? String(key.value) : String(key);
 }
 
-/**
- * Whether engines.node allows a matrix entry: an exact version it satisfies, or a major
- * (or major.minor) any of whose versions it allows.
- */
 function allowsNodeVersion(nodeEngines: string, value: unknown) {
   const version = String(value);
   if (semver.valid(version)) {

@@ -19,10 +19,6 @@ interface PackageRule {
   matchDepTypes?: string[];
 }
 
-/**
- * Owns `.github/renovate.json`: automerge, a 7-day minimum release age, `pnpm dedupe`,
- * and, with named catalogs, a range strategy per catalog. Existing settings are kept.
- */
 export const blockRenovate = rootBase.createBlock({
   about: {
     name: 'Renovate',

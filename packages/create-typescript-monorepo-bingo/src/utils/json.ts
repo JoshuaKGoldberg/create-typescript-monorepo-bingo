@@ -5,12 +5,7 @@ import { sortPackageJson } from 'sort-package-json';
 
 import { printValue, readJsonLayout } from './print.ts';
 
-/**
- * Stringifies a value as JSON with a trailing newline.
- * Objects and arrays that exist in `existingText` keep their one-line or multi-line layout.
- */
 export function formatJson(value: unknown, existingText?: string): string {
-  // A file whose content doesn't change is written back exactly as it was.
   if (
     existingText !== undefined &&
     isDeepStrictEqual(parseJsonc(existingText, [], { allowTrailingComma: true }), value)
@@ -29,18 +24,13 @@ export function formatJson(value: unknown, existingText?: string): string {
   })}\n`;
 }
 
-/**
- * Detects an existing file's indentation, such as tabs, defaulting to two spaces.
- */
 function detectIndent(text: string | undefined) {
-  // The shallowest indentation is one level.
   const indents = [...(text ?? '').matchAll(/^([ \t]+)\S/gm)].map((match) => match[1]);
   return indents.sort((a, b) => a.length - b.length).at(0) ?? '  ';
 }
 
 /**
- * Edits JSONC text (with comments or trailing commas) in place to equal a value,
- * so comments and formatting outside the changed parts are kept.
+ * Edits in place so that comments and formatting are kept.
  */
 function editJsonc(text: string, value: unknown): string {
   let result = text;
@@ -58,7 +48,7 @@ function editJsonc(text: string, value: unknown): string {
       return;
     }
 
-    // Arrays are edited by index, so comments between existing items are kept.
+    // Edited by index to keep comments between items
     if (Array.isArray(before) && Array.isArray(after)) {
       for (let index = before.length - 1; index >= after.length; index -= 1) {
         result = applyEdits(result, modify(result, [...path, index], undefined, editOptions));
@@ -100,28 +90,21 @@ function isStrictJson(text: string) {
   }
 }
 
-/**
- * Stringifies a package.json, sorted the way eslint-plugin-package-json expects.
- */
 export function formatPackageJson(value: Record<string, unknown>, existingText?: string): string {
-  // New manifests are sorted, and so are existing ones that already were; others keep
-  // their key order.
+  // Existing manifests that weren't sorted keep their order
   const cleaned = removeUndefined(value);
   const existing: unknown = existingText === undefined ? undefined : parseJsonc(existingText);
   if (existing === undefined) {
     return formatJson(sortPackageJson(cleaned), existingText);
   }
 
-  // Only top-level keys are put in order: nested ones, like exports, may be in theirs on purpose.
+  // Nested keys, such as exports, may be intentionally ordered
   const ordered = hasSortedKeys(existing as Record<string, unknown>)
     ? Object.fromEntries(Object.keys(sortPackageJson(cleaned)).map((key) => [key, cleaned[key]]))
     : cleaned;
   return formatJson(ordered, existingText);
 }
 
-/**
- * Whether a manifest's top-level keys are in the order eslint-plugin-package-json expects.
- */
 export function hasSortedKeys(manifest: Record<string, unknown>): boolean {
   return hasSameKeyOrder(manifest, sortPackageJson(manifest));
 }
@@ -130,17 +113,28 @@ export function hasSameKeyOrder(a: object, b: object): boolean {
   return JSON.stringify(Object.keys(a)) === JSON.stringify(Object.keys(b));
 }
 
-/**
- * Sorts an object's keys alphabetically, as package.json collections expect.
- */
 export function sortKeys<T>(value: Record<string, T>): Record<string, T> {
   return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
 }
 
-/**
- * Merges scripts in the order package-json/sort-collections expects, if the existing ones
- * already are; otherwise existing scripts keep their order, with new ones after them.
- */
+export function hasSortedKeysDeep(value: unknown): boolean {
+  return JSON.stringify(value) === JSON.stringify(sortKeysDeep(value));
+}
+
+export function sortKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortKeysDeep);
+  }
+
+  return isPlainObject(value)
+    ? Object.fromEntries(
+        Object.entries(value)
+          .sort(([a], [b]) => (a < b ? -1 : 1))
+          .map(([key, child]) => [key, sortKeysDeep(child)]),
+      )
+    : value;
+}
+
 export function mergeScripts(
   existing: Record<string, string> | undefined,
   ours: Record<string, string>,
@@ -155,14 +149,10 @@ export function mergeScripts(
 }
 
 function sortScripts(scripts: Record<string, string>): Record<string, string> {
-  // On their own, since sort-package-json leaves scripts alone next to some dependencies.
+  // sort-package-json leaves scripts alone next to some dependencies
   return sortPackageJson({ scripts }).scripts;
 }
 
-/**
- * Creates an object with an existing object's keys first, in their order,
- * followed by any default keys the existing object doesn't have.
- */
 export function withDefaults<T extends Record<string, unknown>>(
   existing: Record<string, unknown> | undefined,
   defaults: T,
@@ -170,14 +160,11 @@ export function withDefaults<T extends Record<string, unknown>>(
   return existing ? ({ ...existing, ...omitKeys(defaults, Object.keys(existing)) } as T) : defaults;
 }
 
-/**
- * Removes undefined-valued keys from an object, shallowly.
- */
 function removeUndefined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 }
 
-function omitKeys(value: Record<string, unknown>, keys: string[]) {
+export function omitKeys(value: Record<string, unknown>, keys: string[]): Record<string, unknown> {
   const omitted = new Set(keys);
   return Object.fromEntries(Object.entries(value).filter(([key]) => !omitted.has(key)));
 }

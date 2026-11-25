@@ -10,18 +10,12 @@ const choiceValues = {
 } as const;
 
 /**
- * Options whose explicit values can't always be inferred back from a repository's files.
+ * Options that can't always be inferred from a repository's files.
  */
 export type Choices = Partial<Pick<RootOptions, keyof typeof choiceValues>>;
 
-/**
- * The root package.json property that remembers those.
- */
 export const choicesKey = 'create-typescript-monorepo-bingo';
 
-/**
- * Reads the choices a repository's root package.json remembers.
- */
 export function readChoices(files: IntakeDirectory): Choices {
   const manifest = parseJsonText(readText(files, 'package.json'), 'package.json');
   const value = manifest[choicesKey];
@@ -34,9 +28,6 @@ export function readChoices(files: IntakeDirectory): Choices {
   );
 }
 
-/**
- * Gets what else a repository holds in that property, which is kept.
- */
 export function getOtherChoices(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(value).filter(

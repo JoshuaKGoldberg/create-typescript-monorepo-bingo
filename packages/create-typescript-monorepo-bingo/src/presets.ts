@@ -28,9 +28,6 @@ import { blockTransitions } from './blocks/root/blockTransitions.ts';
 import { blockVitest } from './blocks/root/blockVitest.ts';
 import { blockVSCode } from './blocks/root/blockVSCode.ts';
 
-/**
- * Every repository-level Block, in the order they're produced.
- */
 const rootBlocks = [
   blockAllContributors,
   blockBuildPackage,
@@ -59,9 +56,6 @@ const rootBlocks = [
   blockVSCode,
 ];
 
-/**
- * Repository-level Blocks, as a Preset.
- */
 export const rootPreset = rootBase.createPreset({
   about: {
     name: 'Root',
@@ -69,9 +63,6 @@ export const rootPreset = rootBase.createPreset({
   blocks: rootBlocks,
 });
 
-/**
- * Every per-package Block, for `library` packages.
- */
 export const packageBlocks = [
   blockPackageJson,
   blockPackageStarter,
@@ -79,9 +70,6 @@ export const packageBlocks = [
   blockPackageTSDown,
 ];
 
-/**
- * Per-package Blocks, as a Preset.
- */
 export const packagePreset = packageBase.createPreset({
   about: {
     name: 'Package',

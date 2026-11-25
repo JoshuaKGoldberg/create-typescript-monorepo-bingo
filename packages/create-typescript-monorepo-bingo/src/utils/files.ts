@@ -1,9 +1,6 @@
 import type { IntakeDirectory, IntakeEntry } from 'bingo-fs';
 import { type ParseError, parse as parseJsonc } from 'jsonc-parser';
 
-/**
- * Finds an entry by slash-separated path in an intake directory.
- */
 export function getEntry(
   files: IntakeDirectory | undefined,
   filePath: string,
@@ -21,9 +18,6 @@ export function getEntry(
   return current;
 }
 
-/**
- * Finds a directory by slash-separated path in an intake directory.
- */
 export function getDirectory(
   files: IntakeDirectory | undefined,
   directoryPath: string,
@@ -32,18 +26,13 @@ export function getDirectory(
   return entry && !Array.isArray(entry) ? entry : undefined;
 }
 
-/**
- * Reads a file's text by slash-separated path in an intake directory.
- */
 export function readText(files: IntakeDirectory | undefined, filePath: string): string | undefined {
   const entry = getEntry(files, filePath);
   return Array.isArray(entry) ? entry[0] : undefined;
 }
 
 /**
- * Reads and parses a JSON (or JSONC, with comments and trailing commas) file by
- * slash-separated path in an intake directory. Returns undefined for missing files.
- * @throws If the file exists but can't be parsed, so it's never mistaken for empty.
+ * @throws If the file can't be parsed, so that it isn't mistaken for empty.
  */
 export function readJson(
   files: IntakeDirectory | undefined,
@@ -54,8 +43,7 @@ export function readJson(
 }
 
 /**
- * Parses JSON or JSONC text from an intake prop, or returns an empty object for none.
- * @throws If the text can't be parsed, so a file is never mistaken for empty and wiped.
+ * @throws If the text can't be parsed, so that it isn't mistaken for empty.
  */
 export function parseJsonText(
   text: string | undefined,
@@ -75,8 +63,7 @@ export function parseJsonText(
 }
 
 /**
- * Other file names tools read their config from, which CTM doesn't write itself.
- * If a repository uses one, CTM leaves it alone rather than add a second, competing file.
+ * Other config files that tools read, which CTM avoids competing with.
  */
 export const alternateConfigFiles = {
   cspell: [
@@ -129,9 +116,6 @@ export const alternateConfigFiles = {
   ],
 } as const;
 
-/**
- * Finds which alternate config file, if any, a repository has for a tool.
- */
 export function findAlternateConfig(
   files: IntakeDirectory | undefined,
   tool: keyof typeof alternateConfigFiles,
@@ -139,17 +123,10 @@ export function findAlternateConfig(
   return alternateConfigFiles[tool].find((name) => getEntry(files, name) !== undefined);
 }
 
-/**
- * Creates the suggestion shown when CTM leaves an alternate config file alone.
- */
 function describeAlternateConfig(alternate: string, ours: string): string {
-  return `Found ${alternate}, so ${ours} wasn't written. Move its settings to ${ours} and delete it to have create-typescript-monorepo-bingo manage it.`;
+  return `${ours} wasn't added because ${alternate} already exists. Move its settings to ${ours} and delete it to have it managed.`;
 }
 
-/**
- * Drops a file from a Block's creation when the repository uses an alternate config file,
- * and suggests how to move to CTM's.
- */
 export function withoutAlternate<Creation extends { files?: object; suggestions?: string[] }>(
   alternate: string | undefined,
   filePath: string,
@@ -172,8 +149,7 @@ export function withoutAlternate<Creation extends { files?: object; suggestions?
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete directory[fileName];
 
-  // The repository configures the tool itself, so its dependencies, scripts and CI jobs
-  // aren't CTM's to add either.
+  // The tool's dependencies, scripts, and CI jobs aren't managed either
   return {
     ...creation,
     extensions: [],
@@ -183,24 +159,16 @@ export function withoutAlternate<Creation extends { files?: object; suggestions?
 }
 
 /**
- * The first line of files CTM owns entirely. An existing file without it is the
- * repository's own, and is left alone with a suggestion, so nothing is overwritten
- * without the repository opting in.
+ * Existing files without this line are left alone.
  */
 export const ownedFileMarker =
   '// Managed by create-typescript-monorepo-bingo: changes here are replaced on transitions.';
 
-/**
- * Whether CTM may write an owned file: it's new, or it carries the marker.
- */
 export function isOwnedFile(text: string | undefined): boolean {
-  // Anywhere as its own line: import sorting can move imports above it.
+  // Import sorting can move imports above the marker
   return text === undefined || text.split('\n').some((line) => line.trim() === ownedFileMarker);
 }
 
-/**
- * Creates the suggestion shown when CTM leaves an unmarked owned file alone.
- */
 export function describeUnownedFile(filePath: string): string {
-  return `${filePath} wasn't created by create-typescript-monorepo-bingo, so it wasn't replaced. Delete it, or add "${ownedFileMarker}" as a line at its top, to have it managed.`;
+  return `${filePath} already exists, so it wasn't replaced. Delete it or add a "${ownedFileMarker}" line at its top to have it managed.`;
 }

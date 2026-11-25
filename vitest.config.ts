@@ -5,16 +5,15 @@ import path from 'node:path';
 
 import { defaultExclude, defineConfig } from 'vitest/config';
 
-// Untyped, so this works with every Vitest version that has projects.
+// Untyped to work with all Vitest versions that have projects
 const config = defineConfig({
   test: {
-    // Packages without tests yet, like a new one, don't fail the run.
-    passWithNoTests: true,
     coverage: {
       exclude: [...defaultExclude, '**/config.ts'],
       include: ['packages/*/src/**/*.ts'],
       reporter: ['html', 'lcov', 'text'],
     },
+    passWithNoTests: true,
 
     projects: readdirSync(path.join(import.meta.dirname, 'packages'), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())

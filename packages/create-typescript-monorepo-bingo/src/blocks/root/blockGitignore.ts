@@ -9,8 +9,7 @@ import { getPackageParents } from '../../utils/options.ts';
 const anchoredNodeModules = new Set(['/node_modules', '/node_modules/']);
 
 /**
- * Owns `.gitignore`. Entries stay unanchored, so `node_modules/` also ignores
- * `packages/*\/node_modules`. Existing entries and comments are kept.
+ * Entries are unanchored so that `node_modules/` also ignores packages' directories.
  */
 export const blockGitignore = rootBase.createBlock({
   about: {
@@ -19,7 +18,6 @@ export const blockGitignore = rootBase.createBlock({
   intake({ files }) {
     const existing = readText(files, '.gitignore');
     return {
-      // Directory names, and packages/*/<name> patterns, that already hold files.
       directories: [...collectDirectoryNames(files)],
       ...(existing !== undefined && { existing }),
     };
@@ -39,7 +37,6 @@ export const blockGitignore = rootBase.createBlock({
     const packageNames = new Set(
       (options.packages ?? []).map((pkg) => pkg.directory.split('/').pop() ?? pkg.directory),
     );
-    // Only directories the repository doesn't already ignore, like build outputs, count.
     const existingMatcher = ignoreMatcher().add(lines.join('\n'));
     const trackedDirectories = (props.directories ?? []).filter(
       (path) => !existingMatcher.ignores(`${path}/`),
@@ -57,8 +54,7 @@ export const blockGitignore = rootBase.createBlock({
       const name = normalizeIgnore(ignore);
       const matcher = ignoreMatcher().add(lines.join('\n'));
 
-      // Package build outputs, like dist and lib, are judged by package paths only; tool
-      // folders, like coverage and .nx, only exist at the root.
+      // dist and lib are in packages, while other outputs are only in the root
       const isPackageOutput = name === 'dist' || name === 'lib';
       const samples = isPackageOutput
         ? parents.map((parent) => `${parent}/package/${name}/file`)
@@ -67,8 +63,7 @@ export const blockGitignore = rootBase.createBlock({
         continue;
       }
 
-      // A bare name would also hide a package with that name, or source folders like
-      // src/lib, so those get precise globs instead.
+      // A bare name could hide a package of that name or a source folder such as src/lib
       if (name !== 'node_modules' && (directories.has(name) || packageNames.has(name))) {
         const precise = isPackageOutput
           ? parents.map((parent) => `${parent}/*/${name}/`)
@@ -89,9 +84,8 @@ export const blockGitignore = rootBase.createBlock({
       lines.push(ignore);
     }
 
-    // An existing entry, like build/, may hide the directories of packages CTM creates.
+    // An existing entry such as build/ could hide new packages
     const hidden: string[] = [];
-    // Without libraries, there's no build package unless it already exists.
     const hasBuild =
       !options.buildPackageSkipped &&
       (options.packages ?? []).some((pkg) => pkg.kind === 'library');
@@ -100,7 +94,7 @@ export const blockGitignore = rootBase.createBlock({
         ignoreMatcher().add(lines.join('\n')).ignores(`${pkg.directory}/package.json`);
       if (((pkg.kind === 'build' && hasBuild) || pkg.name === options.newPackage) && isHidden()) {
         lines.push(`!${pkg.directory}/`);
-        // A negation can't reach into an ignored parent directory.
+        // Negations can't reach into ignored parent directories
         if (isHidden()) {
           lines.pop();
           hidden.push(pkg.directory);
@@ -108,23 +102,20 @@ export const blockGitignore = rootBase.createBlock({
       }
     }
 
-    // A fresh file is kept sorted; an existing one only gets appended to.
     const output = props.existing === undefined ? lines.sort() : lines;
 
     const text = `${output.join('\n')}\n`;
     return {
       files: {
-        // Written back exactly as it was when nothing is added.
         '.gitignore': text.trimEnd() === props.existing?.trimEnd() ? props.existing : text,
       },
       suggestions: [
         ...skipped.map(
           (ignore) =>
-            `${ignore} wasn't added to .gitignore, because package directories with that name hold files in this repository. Ignore build outputs another way.`,
+            `${ignore} wasn't added to .gitignore because it would ignore existing package files. Ignore build outputs another way.`,
         ),
         ...hidden.map(
-          (directory) =>
-            `.gitignore ignores ${directory}, so its files won't be committed. Change the entry that does.`,
+          (directory) => `${directory} is ignored by .gitignore. Remove the entry that ignores it.`,
         ),
       ],
     };
@@ -132,16 +123,12 @@ export const blockGitignore = rootBase.createBlock({
 });
 
 /**
- * Normalizes an ignore pattern for comparison: `dist`, `dist/`, `**\/dist` and
- * `**\/dist/` are the same.
+ * Normalizes equivalent patterns, such as `dist`, `dist/`, and `**\/dist`.
  */
 function normalizeIgnore(pattern: string) {
   return pattern.replace(/^\*\*\//, '').replace(/\/$/, '');
 }
 
-/**
- * Collects the paths of directories that hold files.
- */
 function collectDirectoryNames(
   directory: IntakeDirectory | undefined,
   paths = new Set<string>(),

@@ -21,11 +21,6 @@ const docPaths = [
   'README.md',
 ];
 
-/**
- * Writes the repository's prose files: README, license, contributing, development and
- * security docs, the code of conduct, and issue and PR templates.
- * These are repository-owned once they exist: CTM only creates missing ones.
- */
 export const blockDocs = rootBase.createBlock({
   about: {
     name: 'Docs',
@@ -66,8 +61,7 @@ export const blockDocs = rootBase.createBlock({
 });
 
 /**
- * Whether a repository already has a doc, in any letter case, in any of the places
- * GitHub looks (the root, docs/ and .github/), or, for issue templates, any template.
+ * Whether a doc exists, in any letter case and any directory GitHub looks in.
  */
 function hasEquivalentDoc(files: IntakeDirectory | undefined, docPath: string) {
   const segments = docPath.split('/');
@@ -98,7 +92,7 @@ function createIssueTemplate(name: string, description: string, title: string, l
       {
         attributes: {
           label: 'Overview',
-          description: `What would you like to report or propose?`,
+          description: 'What would you like to report?',
         },
         type: 'textarea',
         validations: { required: true },
@@ -106,7 +100,7 @@ function createIssueTemplate(name: string, description: string, title: string, l
       {
         attributes: {
           label: 'Additional Info',
-          description: 'Any additional info you would like to provide?',
+          description: "Any additional info you'd like to provide.",
         },
         type: 'textarea',
       },
@@ -131,7 +125,7 @@ Please report unacceptable behavior to the project maintainers${options.email ? 
 `,
     '.github/CONTRIBUTING.md': `# Contributing
 
-Thanks for your interest in contributing to ${options.title}! 💖
+Thanks for your interest in contributing to \`${options.repository}\`! 💖
 
 ## Code of Conduct
 
@@ -170,13 +164,12 @@ See [DEVELOPMENT.md](./DEVELOPMENT.md) for how to set up the repository locally.
 After [forking the repo from GitHub](https://help.github.com/articles/fork-a-repo) and [installing pnpm](https://pnpm.io/installation):
 
 \`\`\`shell
-git clone https://github.com/<your-name-here>/${options.repository}
+git clone https://github.com/(your-name-here)/${options.repository}
 cd ${options.repository}
 pnpm install
 \`\`\`
 
-This repository is a pnpm workspace monorepo.
-Each package lives under \`packages/\`${options.buildPackageSkipped ? '' : ', and shared build configuration lives in `packages/build`'}.
+Each package is under \`packages/\`${options.buildPackageSkipped ? '' : ', with shared build configuration in `packages/build`'}.
 
 ${
   options.buildPackageSkipped
@@ -185,8 +178,8 @@ ${
 
 ${
   usesTaskRunner(options)
-    ? `Run each package's [tsdown](https://tsdown.dev) build, in dependency order, through ${options.taskRunner === 'turbo' ? 'Turborepo' : options.taskRunner === 'nx' ? 'Nx' : 'pnpm'}, to build every package's \`src/\` into \`dist/\`:`
-    : "Run [tsdown](https://tsdown.dev) in workspace mode to build every package's `src/` into `dist/`:"
+    ? `Run [**tsdown**](https://tsdown.dev) through ${options.taskRunner === 'turbo' ? 'Turborepo' : options.taskRunner === 'nx' ? 'Nx' : 'pnpm'} to build each package's \`src/\` into \`dist/\`:`
+    : "Run [**tsdown**](https://tsdown.dev) to build each package's `src/` into `dist/`:"
 }
 
 \`\`\`shell
@@ -220,14 +213,14 @@ ${options.formatter === 'biome' ? 'pnpm exec biome check --write .' : 'pnpm form
 ${
   options.linter === 'none'
     ? 'Linters include'
-    : `[ESLint](https://eslint.org) is used with [typescript-eslint](https://typescript-eslint.io) to lint JavaScript, TypeScript, JSON, YAML and Markdown files:
+    : `[ESLint](https://eslint.org) is used with [typescript-eslint](https://typescript-eslint.io) to lint source files:
 
 \`\`\`shell
 pnpm lint
 \`\`\`
 
 Other linters include`
-} [cspell](https://cspell.org) for spelling and [Knip](https://knip.dev) for unused files, dependencies and exports:
+} [CSpell](https://cspell.org) for spelling and [Knip](https://knip.dev) for unused files, dependencies, and code exports:
 
 \`\`\`shell
 pnpm lint:spelling
@@ -244,7 +237,7 @@ ${
 pnpm test
 \`\`\`
 `
-    : `[Vitest](https://vitest.dev) is used for tests, with one project per package:
+    : `[Vitest](https://vitest.dev) is used for tests:
 
 \`\`\`shell
 pnpm test
@@ -258,18 +251,17 @@ ${
 `
 }
 ${
-  // Packages extending the root tsconfig.json leave it without a tsc -b typecheck.
   options.rootTSConfigExtended || options.typescriptKept
     ? ''
     : `## Type Checking
 
-TypeScript 7 runs type checking across every package's project references:
+Run the [TypeScript](https://typescriptlang.org) command-line to type check all packages:
 
 \`\`\`shell
 pnpm typecheck
 \`\`\`
 
-The \`typescript\` dependency is aliased to TypeScript 6 for tools that use TypeScript's JavaScript API, such as typescript-eslint and tsdown's declaration generator.
+The \`typescript\` dependency is aliased to TypeScript 6 for tools that use its JavaScript API.
 
 `
 }## Releasing
@@ -281,17 +273,10 @@ Add a changeset describing your change with:
 pnpm changeset
 \`\`\`
 
-The release workflow then opens a "Version Packages" PR, and publishes once it's merged.
-It needs, once per repository:
-
-- A GitHub App with contents, pull requests and workflows write access, installed on the repository, with its client ID in the \`${options.releaseApp ?? defaults.releaseApp}_CLIENT_ID\` Actions variable and a private key in the \`${options.releaseApp ?? defaults.releaseApp}_PRIVATE_KEY\` Actions secret
-- An [npm trusted publisher](https://docs.npmjs.com/trusted-publishers) for each package, pointing at the release workflow (a package's very first version may need to be published manually)
-- [Codecov](https://codecov.io) enabled for the repository, for coverage uploads
-
-The same GitHub App is used by the weekly transitions workflow, which re-runs [\`create-typescript-monorepo-bingo\`](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo) and opens a PR with any changes.
+The release workflow will send a _"Version Packages"_ PR, then publish once it's merged.
 `,
     '.github/ISSUE_TEMPLATE/01-bug.{yaml}': createIssueTemplate(
-      '🐛 Report a Bug',
+      '🐛 Bug',
       'Report a bug trying to run the code',
       '🐛 Bug: <short description of the bug>',
       'type: bug',
@@ -303,7 +288,7 @@ The same GitHub App is used by the weekly transitions workflow, which re-runs [\
       'area: documentation',
     ),
     '.github/ISSUE_TEMPLATE/03-feature.{yaml}': createIssueTemplate(
-      '🚀 Request a Feature',
+      '🚀 Feature',
       'Request that a new feature be added or an existing feature improved',
       '🚀 Feature: <short description of the feature>',
       'type: feature',
@@ -314,7 +299,7 @@ The same GitHub App is used by the weekly transitions workflow, which re-runs [\
       '🛠 Tooling: <short description of the change>',
       'area: tooling',
     ),
-    '.github/PULL_REQUEST_TEMPLATE.md': `<!-- 👋 Hi, thanks for sending a PR to ${options.repository}! 💖.
+    '.github/PULL_REQUEST_TEMPLATE.md': `<!-- 👋 Hi, thanks for sending a PR to ${options.repository}! 💖
 Please fill out all fields below and make sure each item is true and [x] checked.
 Otherwise we may not be able to review your PR. -->
 
@@ -334,7 +319,7 @@ We take all security vulnerabilities seriously.
 If you have a vulnerability or other security issues to disclose:
 
 - Thank you very much, please do!
-- Please send them to us by [reporting a vulnerability on GitHub](${url}/security/advisories/new).
+- Please send them to us by [reporting a vulnerability on GitHub](${url}/security/advisories/new)
 
 We appreciate your efforts and responsible disclosure and will make every effort to acknowledge your contributions.
 `,
@@ -361,7 +346,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 </p>
 
 ${
-  // Without packages CTM manages, an empty table would only have its header.
   packages.length
     ? `## Packages
 
@@ -381,7 +365,7 @@ ${packages.map((pkg) => `| [\`${pkg.name}\`](./${pkg.directory}) | ${pkg.descrip
 
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
-> 💝 This monorepo was templated with [\`create-typescript-monorepo-bingo\`](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo).
+> 💝 This monorepo was templated with [\`create-typescript-monorepo-bingo\`](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo) using the [Bingo framework](https://create.bingo).
 `,
   };
 }

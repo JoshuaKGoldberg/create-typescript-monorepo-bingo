@@ -1,58 +1,38 @@
 import { defaults, type PackageSpec, type RootOptions } from '../options.ts';
 
-/**
- * Resolves the npm scope for the private build package, such as `@bingo`.
- */
 function getScope(options: RootOptions): string {
   return options.scope ?? `@${options.repository}`;
 }
 
-/**
- * Resolves the name of the private build package, such as `@bingo/build`.
- */
 export function getBuildPackageName(options: RootOptions): string {
   return `${getScope(options)}/build`;
 }
 
-/**
- * Resolves the dependency name that aliases TypeScript 7.
- */
 export function getTypeScript7Alias(options: RootOptions): string {
   return options.typescript7Alias ?? defaults.typescript7Alias;
 }
 
-/**
- * Resolves a workflow file's path, with the configured extension.
- */
 export function getWorkflowPath(options: RootOptions, name: string): string {
   return `${name}.${options.workflowExtension ?? defaults.workflowExtension}`;
 }
 
-/**
- * Gets the packages that CTM produces with the package preset.
- */
 export function getLibraryPackages(options: RootOptions): PackageSpec[] {
   return (options.packages ?? []).filter((pkg) => pkg.kind === 'library');
 }
 
-/**
- * Gets the repository's URL on GitHub.
- */
 export function getRepositoryUrl(options: RootOptions): string {
   return `https://github.com/${options.owner}/${options.repository}`;
 }
 
 /**
- * Gets the author object for package.json files, falling back to the repository owner,
- * since eslint-plugin-package-json requires attribution.
+ * Attribution is required by eslint-plugin-package-json.
  */
 export function getAuthor(options: RootOptions): { email?: string; name: string } {
   return { name: options.author ?? options.owner, ...(options.email && { email: options.email }) };
 }
 
 /**
- * Sorts packages so that each comes after the workspace packages it depends on.
- * Ties keep their given order.
+ * Sorts packages after the workspace packages they depend on.
  */
 export function sortByDependencies(packages: PackageSpec[]): PackageSpec[] {
   const byName = new Map(packages.map((pkg) => [pkg.name, pkg]));
@@ -84,16 +64,12 @@ export function sortByDependencies(packages: PackageSpec[]): PackageSpec[] {
   return sorted;
 }
 
-/**
- * Whether an opt-in task runner orchestrates per-package scripts.
- */
 export function usesTaskRunner(options: RootOptions): boolean {
   return !!options.taskRunner && options.taskRunner !== 'none';
 }
 
 /**
- * Whether packages build with their own scripts: with a task runner, or when tsdown's
- * workspace mode would skip a package config without an entry of its own.
+ * Whether packages use their own build scripts, as tsdown's workspace mode may skip some.
  */
 export function buildsPerPackage(options: RootOptions): boolean {
   return (
@@ -105,9 +81,6 @@ export function buildsPerPackage(options: RootOptions): boolean {
   );
 }
 
-/**
- * Creates pnpm filters for every package directory, like `--filter "./packages/*"`.
- */
 export function getPackageFilters(options: RootOptions): string {
   return [
     ...getPackageParents(options).map((parent) => `--filter "./${parent}/*"`),
@@ -115,12 +88,9 @@ export function getPackageFilters(options: RootOptions): string {
   ].join(' ');
 }
 
-/**
- * Gets the directories that hold workspace packages, such as `packages` and `apps`.
- */
 export function getPackageParents(options: RootOptions): string[] {
   const parents = new Set(
-    // Every package's parent, including the build package's, since tsc -b emits there too.
+    // The build package is included because tsc -b emits to it
     (options.packages ?? [])
       .map((pkg) => pkg.directory.split('/').slice(0, -1).join('/'))
       .filter(Boolean),
@@ -128,9 +98,6 @@ export function getPackageParents(options: RootOptions): string[] {
   return parents.size ? [...parents].sort() : ['packages'];
 }
 
-/**
- * Gets glob patterns for an output directory, like `dist`, in every package.
- */
 export function getPackageGlobs(options: RootOptions, suffix: string): string[] {
   return [
     ...getPackageParents(options).map((parent) => `${parent}/*/${suffix}`),
@@ -138,9 +105,6 @@ export function getPackageGlobs(options: RootOptions, suffix: string): string[] 
   ];
 }
 
-/**
- * Gets packages in top-level directories, like tools, which have no parent to glob.
- */
 export function getTopLevelPackages(options: RootOptions): string[] {
   return (options.packages ?? [])
     .map((pkg) => pkg.directory)

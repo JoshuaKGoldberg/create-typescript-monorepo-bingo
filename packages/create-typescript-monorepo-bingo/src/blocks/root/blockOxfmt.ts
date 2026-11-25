@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { rootBase } from '../../bases/rootBase.ts';
 import {
   findAlternateConfig,
+  isOwnedFile,
   parseJsonText,
   readText,
   withoutAlternate,
@@ -20,14 +21,11 @@ import {
 } from '../../utils/staticConfig.ts';
 import { blockGitHubActionsCI } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
+import { blockRootTSConfig } from './blockRootTSConfig.ts';
 import { blockVSCode } from './blockVSCode.ts';
 
 const baseIgnorePatterns = ['.all-contributorsrc', '**/CHANGELOG.md', 'coverage', 'pnpm-lock.yaml'];
 
-/**
- * Owns `oxfmt.config.ts`, unless the repository uses Prettier.
- * Settings and ignore patterns in an existing config are kept.
- */
 export const blockOxfmt = rootBase.createBlock({
   about: {
     name: 'Oxfmt',
@@ -35,20 +33,47 @@ export const blockOxfmt = rootBase.createBlock({
   intake({ files }) {
     const alternate = findAlternateConfig(files, 'oxfmt');
     const existing = readText(files, 'oxfmt.config.ts');
+    const manifest = parseJsonText(readText(files, 'package.json'));
+    const eslintConfig =
+      readText(files, 'eslint.config.ts') ??
+      readText(files, findAlternateConfig(files, 'eslint') ?? 'eslint.config.js');
+    const dependencies = {
+      ...(manifest.dependencies as object | undefined),
+      ...(manifest.devDependencies as object | undefined),
+    };
+    const scripts = manifest.scripts as Record<string, string> | undefined;
+    const lintStaged = manifest['lint-staged'] as Record<string, unknown> | undefined;
     return {
       ...(alternate && { alternate }),
       ...(existing !== undefined && { existing }),
       ...(readText(files, '.prettierignore') !== undefined && { hasPrettierIgnore: true }),
-      // Node.js loads oxfmt.config.ts as CommonJS there, where its import statements fail.
-      ...(parseJsonText(readText(files, 'package.json')).type === 'commonjs' && {
+      // Node.js would load oxfmt.config.ts as CommonJS, where import statements fail
+      ...(manifest.type === 'commonjs' && {
         rootCommonJS: true,
       }),
+      // Oxfmt's blank lines between imports could conflict with existing lint rules
+      ...(eslintConfig !== undefined &&
+        !isOwnedFile(eslintConfig) &&
+        /perfectionist\.configs|sort-imports|import\/order/.test(eslintConfig) && {
+          importsLinted: true,
+        }),
+      // Repositories already using Oxfmt may still use Prettier for some files
+      ...(existing === undefined &&
+        'prettier' in dependencies &&
+        !('oxfmt' in dependencies) && {
+          fromPrettier: {
+            format: !!scripts?.format && isPrettier(scripts.format),
+            lintStaged: isPrettier(lintStaged?.['*']),
+          },
+        }),
     };
   },
   props: {
     alternate: z.string().optional(),
     existing: z.string().optional(),
+    fromPrettier: z.object({ format: z.boolean(), lintStaged: z.boolean() }).optional(),
     hasPrettierIgnore: z.boolean().optional(),
+    importsLinted: z.boolean().optional(),
     rootCommonJS: z.boolean().optional(),
     ignorePatterns: z.array(z.string()).optional(),
   },
@@ -56,12 +81,11 @@ export const blockOxfmt = rootBase.createBlock({
     if (options.formatter === 'none') {
       return {
         suggestions: [
-          "CTM didn't find a formatter it knows, so it didn't add one: a new one would restyle existing files. To adopt Oxfmt, re-run with --formatter oxfmt, then run `pnpm format` once.",
+          "Formatting wasn't set up. To use Oxfmt, re-run with `--formatter oxfmt`, then run `pnpm format` once.",
         ],
       };
     }
 
-    // Biome formats with its own config and checks, which the repository already runs.
     if (options.formatter === 'biome') {
       return {};
     }
@@ -83,7 +107,7 @@ export const blockOxfmt = rootBase.createBlock({
             scripts: { format: 'prettier --write .' },
           }),
         ],
-        // Prettier would otherwise reformat files tools write, like the lockfile.
+        // Prettier would otherwise reformat generated files, such as the lockfile
         files: props.hasPrettierIgnore
           ? {}
           : {
@@ -93,8 +117,7 @@ export const blockOxfmt = rootBase.createBlock({
     }
 
     const existing = readConfigObject(props.existing) ?? {};
-    // A config CTM can't read back statically, or with comments, is the repository's own:
-    // CTM leaves it as it is rather than lose what it can't represent.
+    // Configs with comments or non-static values can't be printed back losslessly
     const keepExisting =
       props.existing !== undefined &&
       (!readConfigObject(props.existing) || hasComments(props.existing));
@@ -105,7 +128,7 @@ export const blockOxfmt = rootBase.createBlock({
     const config: StaticObject = {
       overrides: [{ files: ['.nvmrc'], options: { parser: 'yaml' } }],
       singleQuote: true,
-      sortImports: true,
+      ...(!props.importsLinted && { sortImports: true }),
       sortPackageJson: false,
       ...existing,
       ignorePatterns: mergeList(existingIgnores, [
@@ -121,11 +144,18 @@ export const blockOxfmt = rootBase.createBlock({
     );
 
     return withoutAlternate(props.alternate, 'oxfmt.config.ts', {
-      suggestions: props.rootCommonJS
-        ? [
-            'The root package.json has "type": "commonjs", so Node.js can\'t load oxfmt.config.ts. Remove it, or set "type": "module", for Oxfmt to read its config.',
-          ]
-        : [],
+      suggestions: [
+        ...(props.fromPrettier
+          ? [
+              "Oxfmt was added. Remove Prettier's configuration files other than .prettierignore, dependencies, and VS Code settings, along with any scripts and CI jobs that still run it. Then run `pnpm format`.",
+            ]
+          : []),
+        ...(props.rootCommonJS
+          ? [
+              'Oxfmt can\'t load oxfmt.config.ts because the root package.json has "type": "commonjs". Remove it or set "type": "module".',
+            ]
+          : []),
+      ],
       extensions: [
         blockGitHubActionsCI({
           jobs: [
@@ -139,7 +169,14 @@ export const blockOxfmt = rootBase.createBlock({
         blockRootPackageJson({
           devDependencies: pinned('oxfmt'),
           scripts: { format: 'oxfmt' },
+          replaced: {
+            ...(props.fromPrettier?.format && { scripts: { format: 'oxfmt' } }),
+            ...(props.fromPrettier?.lintStaged && {
+              'lint-staged': { '*': 'oxfmt --no-error-on-unmatched-pattern' },
+            }),
+          },
         }),
+        blockRootTSConfig({ addsConfigFiles: true }),
         blockVSCode({
           extensions: ['oxc.oxc-vscode'],
           settings: { 'editor.defaultFormatter': 'oxc.oxc-vscode' },
@@ -159,3 +196,13 @@ export default config;
     });
   },
 });
+
+/**
+ * Whether a command is only Prettier on every file it's given.
+ */
+function isPrettier(command: unknown) {
+  return (
+    typeof command === 'string' &&
+    /^prettier(?: (?:\.|-u|-w|--(?:ignore-unknown|write)))*$/.test(command)
+  );
+}

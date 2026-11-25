@@ -21,8 +21,7 @@ export interface NpmAlias {
 }
 
 /**
- * Whether a specifier is something CTM never rewrites: a protocol such as `catalog:`
- * or `workspace:`, a local path or tarball, or a git shorthand like `owner/repo#ref`.
+ * Whether a specifier is never rewritten, such as `catalog:` or a local path.
  */
 export function isProtocolSpecifier(specifier: string): boolean {
   return (
@@ -35,8 +34,7 @@ export function isProtocolSpecifier(specifier: string): boolean {
 }
 
 /**
- * Parses an `npm:&lt;name>@&lt;range>` alias, splitting at the last `@`.
- * A last `@` at index 0 (as in `npm:@scope/name`) means there's no range.
+ * Splits at the last `@`, unless it's the start of a scope.
  */
 export function parseNpmAlias(specifier: string): NpmAlias | undefined {
   if (!specifier.startsWith('npm:')) {
@@ -52,13 +50,7 @@ export function parseNpmAlias(specifier: string): NpmAlias | undefined {
 }
 
 /**
- * Picks the specifier to write for a dependency, given what's on disk and what CTM pins.
- * A dependency the repository already has keeps its specifier: upgrades are Renovate's job,
- * and CTM never downgrades or narrows a range. The one exception is switching to a
- * different `npm:` alias target, like `typescript` becoming the TypeScript 6 wrapper,
- * which happens only from a version (or `^`/`~` range) of the same major version.
- * An alias to the dependency's own name, like `typescript: npm:typescript@^5`, counts as
- * a plain range.
+ * Existing specifiers are kept, except to switch to an `npm:` alias of the same major version.
  */
 export function resolveSpecifier(
   existing: string | undefined,
@@ -90,9 +82,7 @@ function isSameMajorVersion(existing: string, ours: string | undefined) {
 }
 
 /**
- * Picks the larger of two specifiers that both describe the same dependency,
- * such as two catalog entries for one name. Unlike {@link resolveSpecifier},
- * neither side is privileged; ties keep the first.
+ * Unlike {@link resolveSpecifier}, neither side is preferred.
  */
 export function largerSpecifier(first: string, second: string, dependency?: string): string {
   const firstAlias = getAlias(first, dependency);
@@ -109,11 +99,9 @@ export function largerSpecifier(first: string, second: string, dependency?: stri
   return hasLargerMinimum(second, first) ? second : first;
 }
 
-/**
- * Gets an alias's target, treating an alias to the dependency itself as a plain range.
- */
 function getAlias(specifier: string, dependency: string | undefined) {
   const alias = parseNpmAlias(specifier);
+  // An alias to the dependency itself is a plain range
   return alias && alias.name === dependency ? undefined : alias;
 }
 
@@ -141,8 +129,7 @@ interface WorkspaceCatalogs {
 }
 
 /**
- * Finds the lowest version a dependency's specifier allows, looking through catalog
- * references in pnpm-workspace.yaml and npm aliases, like npm:typescript@^5.9.3.
+ * Looks through catalog references and npm aliases.
  */
 export function getMinimumVersion(
   name: string,

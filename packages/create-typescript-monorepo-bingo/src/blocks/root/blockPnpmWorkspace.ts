@@ -15,10 +15,6 @@ const catalogEntrySchema = z.object({
   specifier: z.string(),
 });
 
-/**
- * Owns `pnpm-workspace.yaml`: package globs, catalogs, build permissions and settings.
- * Unknown keys and comments in an existing file are kept.
- */
 export const blockPnpmWorkspace = rootBase.createBlock({
   about: {
     name: 'pnpm Workspace',
@@ -39,10 +35,10 @@ export const blockPnpmWorkspace = rootBase.createBlock({
       document.contents = document.createNode({});
     }
 
-    // Maps that were sorted (or are new) stay sorted; hand-ordered ones keep their order.
+    // Existing maps that weren't sorted keep their order
     const unsortedMaps = new WeakSet();
     collectUnsortedMaps(document.contents, unsortedMaps);
-    // An existing file may lead with packages, as pnpm's docs write it, then sort the rest.
+    // pnpm's docs put packages first
     const leadsWithPackages =
       props.existing !== undefined &&
       isMap(document.contents) &&
@@ -51,17 +47,14 @@ export const blockPnpmWorkspace = rootBase.createBlock({
       isMap(document.contents) ? document.contents.items.map((pair) => keyText(pair.key)) : [],
     );
 
-    // Package globs: keep what's there, adding any new ones.
     const existingGlobs = readStrings(document.get('packages'));
     const baseGlobs = existingGlobs.length ? existingGlobs : ['packages/*'];
     const globs = mergeList(existingGlobs.length ? existingGlobs : undefined, [
       ...baseGlobs,
-      // Package directories that no glob covers, like a new packages/build.
       ...(props.packages ?? []).filter(
         (directory) => !baseGlobs.some((glob) => globCovers(glob, directory)),
       ),
     ]);
-    // New globs are appended to an existing list, keeping its comments and quoting.
     const packagesNode = document.get('packages');
     if (isSeq(packagesNode)) {
       for (const glob of globs.filter((candidate) => !existingGlobs.includes(candidate))) {
@@ -79,7 +72,7 @@ export const blockPnpmWorkspace = rootBase.createBlock({
       );
     }
 
-    // The default catalog is written wherever it already is: catalog, or catalogs.default.
+    // The default catalog may be written as either catalog or catalogs.default
     const defaultPath =
       document.has('catalog') || !document.hasIn(['catalogs', 'default'])
         ? ['catalog']
@@ -98,7 +91,6 @@ export const blockPnpmWorkspace = rootBase.createBlock({
     sortMaps(document.contents, unsortedMaps, leadsWithPackages);
     spaceTopLevel(document, originalKeys);
 
-    // A file whose content doesn't change is written back exactly as it was.
     const text =
       props.existing !== undefined &&
       isDeepStrictEqual(parseYaml(props.existing) as unknown, document.toJS() as unknown)
@@ -109,9 +101,9 @@ export const blockPnpmWorkspace = rootBase.createBlock({
       suggestions: [
         ...(options.catalogExcluded ?? []).map(
           (excluded) =>
-            `${excluded.replace(':', ' catalog: ')} has different versions across packages, so it's left out of catalogs. Align them to catalog it.`,
+            `${excluded.slice(excluded.indexOf(':') + 1)} was kept out of the ${excluded.split(':')[0] ?? ''} catalog. Align any different versions and re-run to add it.`,
         ),
-        // CTM reads single-level globs, like packages/*, and exact directories.
+        // Only single-level globs and exact directories are supported
         ...existingGlobs
           .filter(
             (glob) =>
@@ -120,7 +112,7 @@ export const blockPnpmWorkspace = rootBase.createBlock({
           )
           .map(
             (glob) =>
-              `CTM only manages packages matched by single-level globs, like packages/*, so packages matched by ${glob} are left alone. List their parent directories with /* to have CTM manage them.`,
+              `Packages matched by ${glob} weren't changed. Use single-level globs such as packages/* to have them managed.`,
           ),
       ],
       files: {
@@ -131,10 +123,7 @@ export const blockPnpmWorkspace = rootBase.createBlock({
 });
 
 /**
- * Resolves forwarded catalog entries against the ones already on disk.
- * Forwarded entries for one dependency fold to the largest; the result then
- * replaces the disk entry only if it's newer or a different alias target.
- * Disk entries nobody forwarded are kept.
+ * Forwarded entries only replace existing ones if they're newer or a different alias target.
  */
 export function resolveCatalogEntries(
   intake: CatalogEntry[],
@@ -213,7 +202,6 @@ function readStrings(node: unknown): string[] {
 
 function setDeep(document: Document, path: string[], value: unknown) {
   if (Array.isArray(value)) {
-    // Lists like publicHoistPattern keep their existing entries.
     const existing = readStrings(document.getIn(path));
     if (value.every((item) => existing.includes(item as string)) && existing.length) {
       return;
@@ -230,14 +218,13 @@ function setDeep(document: Document, path: string[], value: unknown) {
       setDeep(document, [...path, key], child);
     }
   } else if (!document.hasIn(path)) {
-    // Settings the repository already has, like a build permission, are its own.
     document.setIn(path, value);
   }
 }
 
 function collectUnsortedMaps(node: unknown, unsorted: WeakSet<object>) {
   if (isMap(node)) {
-    // A leading packages key, as pnpm's docs write it, doesn't count when checking order.
+    // pnpm's docs put packages first
     const keys = node.items
       .map((pair) => keyText(pair.key))
       .filter((key, index) => index > 0 || key !== 'packages');
@@ -272,16 +259,12 @@ function sortMaps(node: unknown, unsorted: WeakSet<object>, leadsWithPackages = 
   }
 }
 
-/**
- * If top-level keys are separated by blank lines, keeps new ones separated too.
- */
 function spaceTopLevel(document: Document, originalKeys: Set<string>) {
   const node = document.contents;
   if (!isMap(node)) {
     return;
   }
 
-  // New keys get a blank line before them only when most existing keys have one.
   const pairs = node.items.slice(1);
   const spaced = pairs.filter((pair) => isNode(pair.key) && pair.key.spaceBefore).length;
   if (spaced * 2 < pairs.length) {
@@ -302,9 +285,6 @@ function spaceTopLevel(document: Document, originalKeys: Set<string>) {
   }
 }
 
-/**
- * Leaves out build permissions for packages the repository's allowBuilds already covers.
- */
 function withoutAllowedBuilds(document: Document, permissions: unknown) {
   const allowBuilds = document.get('allowBuilds');
   if (!isMap(allowBuilds) || !permissions || typeof permissions !== 'object') {

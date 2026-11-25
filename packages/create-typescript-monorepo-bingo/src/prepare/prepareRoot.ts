@@ -15,6 +15,7 @@ import {
   readJson,
   readText,
 } from '../utils/files.ts';
+import { hasSortedKeysDeep } from '../utils/json.ts';
 import { pin, tryPin } from '../utils/pins.ts';
 import {
   getMinimumVersion,
@@ -47,10 +48,6 @@ export interface WorkspacePackage {
   manifest: PackageManifest;
 }
 
-/**
- * Infers root options from an existing repository's files.
- * Every value is optional: in setup mode there are no files, and produce() fills defaults.
- */
 export function prepareRoot(
   context: TemplatePrepareContext<Partial<RootOptions>, unknown>,
 ): Partial<RootOptions> {
@@ -118,16 +115,18 @@ export function prepareRoot(
     ...(!('typescript7Alias' in inferTypeScript7Alias(rootManifest, workspace)) &&
       keepsTypeScript(files, rootManifest) && {
         typescriptKept: true,
-        // Nothing existing needs one, and an older tsc may reject its sources.
+        // An older tsc may reject the build package's sources
         ...(readText(files, 'packages/build/package.json') === undefined && {
           buildPackageSkipped: true,
         }),
       }),
     ...inferChoices(files, rootManifest, workspacePackages),
-    // Choices made explicitly before, which the files alone may not show.
+    // Explicit choices may not be shown by files alone
     ...readChoices(files),
     ...inferVitestConfig(files),
+    ...inferSetupAction(files),
     ...inferWorkflowExtension(files),
+    ...inferWorkflowKeysSorted(files),
   };
 }
 
@@ -143,8 +142,7 @@ function inferChoices(
 }
 
 /**
- * Finds choices that wouldn't be inferred from a repository's files once CTM has written
- * its own, so they need to be remembered.
+ * Finds choices that later transitions wouldn't be able to infer.
  */
 export function findExplicitChoices(files: IntakeDirectory, options: RootOptions): Choices {
   const formatter = options.formatter ?? 'oxfmt';
@@ -152,7 +150,6 @@ export function findExplicitChoices(files: IntakeDirectory, options: RootOptions
   const testRunner = options.testRunner ?? 'vitest';
   const explicit: Choices = { ...(linter !== 'eslint' && { linter }) };
 
-  // A new repository's files always show its formatter and test runner.
   if (!Object.keys(files).length) {
     return explicit;
   }
@@ -172,8 +169,7 @@ export function findExplicitChoices(files: IntakeDirectory, options: RootOptions
       findWorkspacePackages(files, readWorkspaceYaml(files)?.packages ?? ['packages/*']),
     ),
   };
-  // A choice that's already remembered stays until another one is made, since what CTM
-  // writes can otherwise look like it was inferred.
+  // Files written by CTM can otherwise make a remembered choice look inferred
   const remembered = readChoices(files);
   return {
     ...((formatter !== inferred.formatter || formatter === remembered.formatter) && { formatter }),
@@ -185,9 +181,7 @@ export function findExplicitChoices(files: IntakeDirectory, options: RootOptions
 }
 
 /**
- * Whether a repository's TypeScript can't become CTM's TypeScript 6 and 7 aliases: it's
- * older than 6, or tsconfigs use options TypeScript 7 removed, which TypeScript 6 only
- * accepts with ignoreDeprecations. One that already has the aliases already runs them.
+ * Whether TypeScript is older than 6, or tsconfigs use options removed in TypeScript 7.
  */
 function keepsTypeScript(files: IntakeDirectory, manifest: PackageManifest | undefined) {
   const typescript = manifest && getAllDependencies(manifest).typescript;
@@ -206,9 +200,6 @@ function keepsTypeScript(files: IntakeDirectory, manifest: PackageManifest | und
   );
 }
 
-/**
- * Any tsconfig counts, since others may extend it, apart from test fixtures' own.
- */
 function ignoresDeprecations(directory: IntakeDirectory): boolean {
   return Object.entries(directory).some(([name, entry]) => {
     if (!entry) {
@@ -254,15 +245,14 @@ function readWorkspaceYaml(files: IntakeDirectory): undefined | WorkspaceYaml {
 }
 
 /**
- * Finds workspace packages by matching `packages/*`-style globs against the in-memory files.
- * Only single-level `&lt;directory>/*` globs and exact directories are supported.
+ * Only single-level globs and exact directories are supported.
  */
 export function findWorkspacePackages(
   files: IntakeDirectory | CreatedDirectory,
   globs: string[],
 ): WorkspacePackage[] {
   const found: WorkspacePackage[] = [];
-  // Hand-written lists may hold empty items, which pnpm ignores.
+  // Hand-written lists may have empty items
   globs = globs.filter((glob): glob is string => typeof glob === 'string');
   const excluded = new Set(
     globs
@@ -285,7 +275,7 @@ export function findWorkspacePackages(
     for (const directory of candidates) {
       const packageFiles = getDirectory(files as IntakeDirectory, directory);
       const manifest = readJson(packageFiles, 'package.json') as PackageManifest | undefined;
-      // Overlapping globs, like packages/* and packages/a, find a package once.
+      // Overlapping globs may find a package multiple times
       if (
         packageFiles &&
         manifest &&
@@ -309,9 +299,6 @@ function isExcluded(directory: string, excluded: Set<string>) {
   );
 }
 
-/**
- * Infers what kind of package a workspace directory holds.
- */
 export function inferPackageKind({ directory, files, manifest }: WorkspacePackage): PackageKind {
   if (manifest.name?.endsWith('/build') && directory.endsWith('/build')) {
     return 'build';
@@ -357,7 +344,7 @@ function createPackageSpec(pkg: WorkspacePackage, all: WorkspacePackage[]): Pack
     directory: pkg.directory,
     ...(pkg.manifest.homepage && { homepage: pkg.manifest.homepage }),
     ...(tsconfig?.compilerOptions?.isolatedDeclarations && { isolatedDeclarations: true }),
-    // tsdown's workspace mode skips package configs without an entry of their own.
+    // tsdown's workspace mode skips package configs without their own entry
     ...(!isTsdownWorkspaceReady(readText(pkg.files, 'tsdown.config.ts')) && {
       tsdownWorkspaceReady: false,
     }),
@@ -375,10 +362,6 @@ function createPackageSpec(pkg: WorkspacePackage, all: WorkspacePackage[]): Pack
   };
 }
 
-/**
- * Whether a package's tsconfig extends the root tsconfig.json, which it then shares
- * settings with, like include and noEmit.
- */
 function extendsRootTSConfig(pkg: WorkspacePackage) {
   const tsconfig = readJson(pkg.files, 'tsconfig.json') as undefined | { extends?: unknown };
   return [tsconfig?.extends]
@@ -391,10 +374,6 @@ function extendsRootTSConfig(pkg: WorkspacePackage) {
     );
 }
 
-/**
- * Whether a package's tsconfig extends the build package's shared base, as CTM's do.
- * Other tsconfigs are the repository's own, which CTM leaves alone.
- */
 function extendsBuildTSConfig(tsconfig: undefined | { extends?: unknown }) {
   return [tsconfig?.extends]
     .flat()
@@ -410,7 +389,7 @@ function getAllDependencies(manifest: PackageManifest): Record<string, string> {
 }
 
 function inferCatalogMode(workspace: undefined | WorkspaceYaml): CatalogMode {
-  // Named mode is CTM's dev/prod/peer catalogs; other named catalogs are the repository's.
+  // Other named catalogs are the repository's own
   if (
     Object.keys(workspace?.catalogs ?? {}).some((name) => ['dev', 'peer', 'prod'].includes(name))
   ) {
@@ -429,17 +408,13 @@ interface ManifestWithKind {
 
 const isLiteral = (specifier: string) => !isProtocolSpecifier(specifier);
 
-/**
- * Gets what a catalog entry on disk will be after CTM applies its pins.
- */
 function getWrittenCatalogEntry(dependency: string, specifier: string) {
   const pinned = tryPin(dependency);
   return pinned ? resolveSpecifier(specifier, pinned, dependency) : specifier;
 }
 
 /**
- * In default catalog mode, finds dependencies that two or more manifests declare,
- * always with the same specifier, which must also match any existing catalog entry.
+ * Finds dependencies declared multiple times, always with the same specifier.
  */
 export function findSharedDependencies(
   manifests: ManifestWithKind[],
@@ -465,7 +440,7 @@ export function findSharedDependencies(
     }
   }
 
-  // A literal that differs from the catalog entry is a conflict, not a shared dependency.
+  // A literal that differs from the catalog entry is a conflict
   for (const [dependency, specifier] of Object.entries(catalog)) {
     const literals = declarations.get(dependency);
     literals?.add(getWrittenCatalogEntry(dependency, specifier));
@@ -484,8 +459,7 @@ const namedCatalogs: Partial<Record<DependencyField, string>> = {
 };
 
 /**
- * In named catalog mode, finds `&lt;catalog>:&lt;dependency>` pairs that manifests declare
- * with different specifiers. Those stay uncataloged rather than being forced to one version.
+ * Finds dependencies declared with different specifiers in the same named catalog.
  */
 export function findNamedConflicts(
   manifests: ManifestWithKind[],
@@ -496,7 +470,7 @@ export function findNamedConflicts(
   for (const { kind, manifest } of manifests) {
     const record = manifest as Partial<Record<DependencyField, Record<string, string>>>;
     for (const field of dependencyFields) {
-      // The build package's runtime dependencies are development tools.
+      // The build package's runtime dependencies are development tools
       const catalog = kind === 'build' ? 'dev' : namedCatalogs[field];
       if (!catalog) {
         continue;
@@ -507,7 +481,7 @@ export function findNamedConflicts(
           continue;
         }
 
-        // Compare what CTM will write, so a version it's about to change doesn't count.
+        // A version CTM is about to change shouldn't count as a conflict
         const specifier = getWrittenSpecifier(kind, field, dependency, diskSpecifier);
         const key = `${catalog}:${dependency}`;
         specifiers.set(key, (specifiers.get(key) ?? new Set()).add(specifier));
@@ -515,7 +489,7 @@ export function findNamedConflicts(
     }
   }
 
-  // A literal that differs from the existing catalog entry is a conflict too.
+  // A literal that differs from the catalog entry is a conflict
   for (const [catalog, entries] of Object.entries(catalogs)) {
     for (const [dependency, specifier] of Object.entries(entries ?? {})) {
       specifiers
@@ -531,8 +505,7 @@ export function findNamedConflicts(
 }
 
 /**
- * Approximates the specifier CTM's blocks write for a dependency that's on disk,
- * for the dependencies those blocks manage with pinned versions.
+ * Approximates the specifier that Blocks will write.
  */
 function getWrittenSpecifier(
   kind: ManifestWithKind['kind'],
@@ -555,14 +528,13 @@ function getWrittenSpecifier(
 }
 
 function getFirstPerson(manifest: PackageManifest | undefined) {
-  // Contributors aren't authors: without an author, packages fall back to the owner.
   const person = manifest?.author;
   if (!person) {
     return undefined;
   }
 
   if (typeof person === 'string') {
-    // "Name <email> (url)", parsed without backtracking-prone patterns.
+    // "Name <email> (url)", parsed without backtracking-prone patterns
     const name = person.split(/[<(]/)[0]?.trim();
     const email = /<([^>]+)>/.exec(person)?.[1];
     return name ? { email, name } : undefined;
@@ -573,7 +545,7 @@ function getFirstPerson(manifest: PackageManifest | undefined) {
 
 function parseRepository(repository: PackageManifest['repository']) {
   const url = typeof repository === 'string' ? repository : repository?.url;
-  // Full URLs, and npm's "owner/repo" and "github:owner/repo" shorthands.
+  // Full URLs, or npm's "owner/repo" and "github:owner/repo" shorthands
   const match =
     url &&
     (/github\.com[/:]([^/]+)\/([^/#]+?)(?:\.git)?(?:[/#]|$)/.exec(url) ??
@@ -601,21 +573,15 @@ function inferTaskRunner(
     return 'nx';
   }
 
-  // A root that tests by running each package's script is using pnpm as its task runner.
-  // A recursive build alone isn't: CTM writes one for packages tsdown's workspace mode skips.
+  // Recursive builds alone may have been written by CTM for packages tsdown would skip
   return workspace?.tasks || recursivePnpm.test(manifest?.scripts?.test ?? '') ? 'pnpm' : 'none';
 }
 
 const recursivePnpm = /\bpnpm\b[^&|;]*\s(?:-r|--recursive|-F|--filter)\b/;
 
-/**
- * Whether a root build script runs library packages' own build scripts, with pnpm
- * recursively or filtered to them, rather than, say, only a docs site's.
- */
 function buildsLibrariesRecursively(script: string | undefined, packages: PackageSpec[]) {
   const libraries = packages.filter((pkg) => pkg.kind === 'library');
 
-  // Each command counts on its own, as in `pnpm --filter ./docs build && pnpm -r build`.
   return (script ?? '').split(/&&|\|\||;/).some((command) => {
     if (!recursivePnpm.test(command)) {
       return false;
@@ -628,12 +594,12 @@ function buildsLibrariesRecursively(script: string | undefined, packages: Packag
     return (
       !filters.length ||
       filters.some((filter) => {
-        // Negations, and a package's dependencies (`docs...`, `docs^...`), can be libraries.
+        // Negations and `docs...` filters can include libraries
         if (filter.startsWith('!') || filter.endsWith('...')) {
           return true;
         }
 
-        // Path filters, like ./packages/*, are relative to the root; others match names.
+        // Path filters are relative to the root, while others match names
         const isPath = filter.startsWith('.') || filter.startsWith('{');
         const pattern = new RegExp(
           `^${filter
@@ -661,7 +627,7 @@ function inferTypeScript7Alias(
   workspace: undefined | WorkspaceYaml,
 ): Partial<RootOptions> {
   for (const [name, declared] of Object.entries(manifest?.devDependencies ?? {})) {
-    // Look through catalog references, as flint's catalog:dev alias needs.
+    // The specifier may be a catalog reference
     const specifier = declared.startsWith('catalog:')
       ? ((declared === 'catalog:'
           ? (workspace?.catalog?.[name] ?? workspace?.catalogs?.default?.[name])
@@ -686,8 +652,7 @@ function inferWorkflowExtension(files: IntakeDirectory): Partial<RootOptions> {
     return {};
   }
 
-  // Only the workflows CTM writes count: a hand-added deploy.yml shouldn't make CTM
-  // write a second copy of every workflow.
+  // An unrelated deploy.yml shouldn't cause a second copy of every workflow
   for (const name of ['ci', 'release', 'octoguide', 'contributors']) {
     for (const workflowExtension of ['yaml', 'yml'] as const) {
       if (getEntry(workflows, `${name}.${workflowExtension}`)) {
@@ -696,7 +661,6 @@ function inferWorkflowExtension(files: IntakeDirectory): Partial<RootOptions> {
     }
   }
 
-  // With none of those, CTM's follow the repository's, if they're all the same.
   const names = Object.keys(workflows);
   return names.length && names.every((name) => name.endsWith('.yml'))
     ? { workflowExtension: 'yml' }
@@ -704,14 +668,76 @@ function inferWorkflowExtension(files: IntakeDirectory): Partial<RootOptions> {
 }
 
 /**
- * Refuses repositories whose root package.json is itself a published package: CTM manages
- * monorepos whose root is private, with packages in workspace directories.
+ * Finds an action that can be used in place of CTM's setup action, after a checkout.
  */
+function inferSetupAction(files: IntakeDirectory): Partial<RootOptions> {
+  const read = (name: string) =>
+    readText(files, `.github/actions/${name}/action.yml`) ??
+    readText(files, `.github/actions/${name}/action.yaml`);
+
+  const setup = read('setup');
+  if (setup !== undefined) {
+    return /^[\s-]*uses:\s*['"]?actions\/checkout@/m.test(setup) ? {} : { setupAction: 'setup' };
+  }
+
+  const setupAction = Object.keys(getDirectory(files, '.github/actions') ?? {})
+    .sort((a, b) => Number(b === 'prepare') - Number(a === 'prepare'))
+    .find((name) => onlyInstalls(parseYamlObject(read(name))));
+  return setupAction ? { setupAction } : {};
+}
+
+const installActions = /^(?:actions\/cache|actions\/setup-node|pnpm\/action-setup|pnpm\/setup)@/;
+
+function onlyInstalls(action: object) {
+  const { inputs, runs } = action as {
+    inputs?: Record<string, null | { required?: unknown }>;
+    runs?: { steps?: unknown; using?: unknown };
+  };
+  if (
+    runs?.using !== 'composite' ||
+    !Array.isArray(runs.steps) ||
+    Object.values(inputs ?? {}).some((input) => input?.required)
+  ) {
+    return false;
+  }
+
+  const steps = runs.steps as (null | Record<string, unknown>)[];
+  const setups = steps.slice(0, -1);
+  const install = steps.at(-1);
+  return (
+    !!install &&
+    /^pnpm (?:i|install)(?: --frozen-lockfile)?$/.test(String(install.run).trim()) &&
+    install.if === undefined &&
+    install['working-directory'] === undefined &&
+    setups.every((step) => installActions.test(String(step?.uses))) &&
+    setups.some((step) => String(step?.uses).startsWith('pnpm/'))
+  );
+}
+
+function inferWorkflowKeysSorted(files: IntakeDirectory): Partial<RootOptions> {
+  const workflows = Object.entries(getDirectory(files, '.github/workflows') ?? {})
+    .filter(([name]) => /\.ya?ml$/.test(name))
+    .flatMap(([, entry]) => (Array.isArray(entry) ? [parseYamlObject(entry[0])] : []));
+  return workflows.some((workflow) => Object.keys(workflow).length > 1) &&
+    workflows.every(hasSortedKeysDeep)
+    ? { workflowKeysSorted: true }
+    : {};
+}
+
+function parseYamlObject(text: string | undefined): object {
+  try {
+    const value: unknown = text === undefined ? undefined : parseYaml(text);
+    return value && typeof value === 'object' ? value : {};
+  } catch {
+    return {};
+  }
+}
+
 function assertMonorepoRoot(manifest: PackageManifest | undefined) {
   const root = manifest as (PackageManifest & Record<string, unknown>) | undefined;
   if (root && !root.private && (root.main || root.exports || root.bin || root.module)) {
     throw new Error(
-      `The root package.json is a published package${root.name ? ` (${root.name})` : ''}. create-typescript-monorepo-bingo manages monorepos with a private root and packages in workspace directories. If the root isn't published, add "private": true to it; for a single-package repository, see create-typescript-app.`,
+      `The root package.json is a published package${root.name ? ` (${root.name})` : ''}. Add "private": true if it isn't published, or see create-typescript-app for single-package repositories.`,
     );
   }
 }
@@ -758,9 +784,6 @@ const prettierConfigs = [
   'prettier.config.ts',
 ];
 
-/**
- * Infers the formatter: a repository that uses Prettier and not Oxfmt keeps Prettier.
- */
 function inferFormatter(
   files: IntakeDirectory,
   manifest: PackageManifest | undefined,
@@ -778,8 +801,7 @@ function inferFormatter(
     return {};
   }
 
-  // Biome may only lint, alongside another formatter; its settings may also turn formatting
-  // off for some languages or paths, which doesn't count.
+  // Biome might be used just for linting
   const biomeFormatter = parseJsonText(biomeConfig, 'biome.json').formatter as
     | undefined
     | { enabled?: boolean };
@@ -787,14 +809,9 @@ function inferFormatter(
     ('@biomejs/biome' in dependencies || biomeConfig !== undefined) &&
     biomeFormatter?.enabled !== false;
 
-  // Styling CTM doesn't recognize, like dprint's or ESLint's, is left alone rather than
-  // reformatted, and so is a repository with none.
+  // Unknown formatters, such as dprint or ESLint Stylistic, should be left alone
   return { formatter: usesPrettier ? 'prettier' : formatsWithBiome ? 'biome' : 'none' };
 }
-
-/**
- * Infers the root Vitest config's file name, when it isn't vitest.config.ts.
- */
 
 function inferVitestConfig(files: IntakeDirectory): Partial<RootOptions> {
   const name = [
@@ -809,7 +826,6 @@ function inferVitestConfig(files: IntakeDirectory): Partial<RootOptions> {
   const existing = readText(files, 'vitest.config.ts');
   return {
     ...(name && { vitestConfig: name }),
-    // A repository's own config may not define the per-package projects CTM's does.
     ...((name !== undefined || (existing !== undefined && !isOwnedFile(existing))) && {
       vitestConfigUnowned: true,
     }),
@@ -817,8 +833,7 @@ function inferVitestConfig(files: IntakeDirectory): Partial<RootOptions> {
 }
 
 /**
- * Infers the description from the root package.json, or else the README's tagline, so
- * transitions (including the weekly workflow's) never need to prompt for it.
+ * Transitions shouldn't need to prompt for a description.
  */
 function inferDescription(
   files: IntakeDirectory,
@@ -828,8 +843,7 @@ function inferDescription(
     return { description: manifest.description };
   }
 
-  // The README's centered tagline, or its first plain paragraph line, skipping code blocks,
-  // HTML comments, headings, lists, quotes, tables and badges.
+  // Finds a centered tagline or first paragraph
   const readme = (readText(files, 'README.md') ?? '')
     .replaceAll(/```[\s\S]*?```/g, '')
     .replaceAll(/<!--[\s\S]*?-->/g, '');
@@ -849,16 +863,14 @@ function isTsdownWorkspaceReady(config: string | undefined) {
 }
 
 /**
- * Infers whether a repository tests with Vitest. A task runner's test script, like
- * `turbo run test`, defers to the packages' own scripts and dependencies.
+ * Task runner test scripts, such as `turbo run test`, defer to packages' own scripts.
  */
 function inferTestRunner(
   files: IntakeDirectory,
   manifest: PackageManifest | undefined,
   packages: WorkspacePackage[],
 ): Partial<RootOptions> {
-  // A root test script of its own, like node --test, is another test runner, even if a
-  // Vitest config is left over.
+  // Scripts are checked first because there may be a leftover Vitest config
   const test: string | undefined = manifest?.scripts?.test;
   const delegates = /\b(?:turbo|nx|lerna)\b/.test(test ?? '') || recursivePnpm.test(test ?? '');
   if (
@@ -870,13 +882,11 @@ function inferTestRunner(
     return { testRunner: 'other' };
   }
 
-  // A root Vitest config, CTM's or the repository's own, is what CTM's setup builds on.
   if (getEntry(files, 'vitest.config.ts') || inferVitestConfig(files).vitestConfig) {
     return {};
   }
 
-  // Without one, any existing tests run with settings a new root config would replace,
-  // like which files are tests, so they're left alone.
+  // A new root config could change which files are tests
   const hasTests = (candidate: PackageManifest | undefined) =>
     !!candidate &&
     ('vitest' in getAllDependencies(candidate) ||
@@ -896,10 +906,10 @@ function inferTestRunner(
     return { testRunner: 'other' };
   }
 
-  // A repository CTM already manages without Vitest, as `--testRunner other` leaves it.
-  // Only files that exist count: a missing one isn't a sign CTM manages the repository.
+  // Repositories managed without Vitest should stay that way
   const managed = ['eslint.config.ts', 'packages/build/src/tsdown/base.ts'].some((path) => {
     const text = readText(files, path);
+    // Missing files also count as owned
     return text !== undefined && isOwnedFile(text);
   });
   return managed ? { testRunner: 'other' } : {};

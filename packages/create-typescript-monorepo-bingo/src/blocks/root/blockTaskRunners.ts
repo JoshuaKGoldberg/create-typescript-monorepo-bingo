@@ -1,3 +1,4 @@
+import type { IntakeDirectory } from 'bingo-fs';
 import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
@@ -10,10 +11,7 @@ import { blockPnpmWorkspace } from './blockPnpmWorkspace.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 
 /**
- * Orchestrates per-package `build` and `test` scripts with pnpm's built-in task graph.
- * Builds run after their workspace dependencies' builds; tests don't wait on anything,
- * because package exports point at source.
- * Only active with `--task-runner pnpm`.
+ * Tests don't wait on builds because package exports point at source.
  */
 export const blockPnpmTasks = rootBase.createBlock({
   about: {
@@ -39,7 +37,7 @@ export const blockPnpmTasks = rootBase.createBlock({
 
     return {
       extensions: [
-        // Existing recursive tests may rely on pnpm running dependencies' scripts first.
+        // Existing recursive tests may rely on running dependencies' scripts first
         ...(props.testsRecursively
           ? []
           : [blockPnpmWorkspace({ settings: { tasks: { test: { dependsOn: [] } } } })]),
@@ -54,20 +52,17 @@ export const blockPnpmTasks = rootBase.createBlock({
   },
 });
 
-/**
- * Orchestrates per-package `build` and `test` scripts with Turborepo.
- * Only active with `--task-runner turbo`.
- */
 export const blockTurborepo = rootBase.createBlock({
   about: {
     name: 'Turborepo',
   },
   intake({ files }) {
     const existingTurbo = readText(files, 'turbo.json');
-    return existingTurbo === undefined ? undefined : { existingTurbo };
+    return existingTurbo === undefined ? readRootBuild(files) : { existingTurbo };
   },
   props: {
     existingTurbo: z.string().optional(),
+    rootBuild: z.string().optional(),
   },
   produce({ options, props }) {
     if (options.taskRunner !== 'turbo') {
@@ -75,6 +70,7 @@ export const blockTurborepo = rootBase.createBlock({
     }
 
     return {
+      suggestions: describeKeptBuild(props.rootBuild, 'turbo run build'),
       extensions: [
         blockGitignore({ ignores: ['.turbo/'] }),
         blockRootPackageJson({
@@ -85,7 +81,6 @@ export const blockTurborepo = rootBase.createBlock({
           },
         }),
       ],
-      // An existing turbo.json is the repository's.
       files:
         props.existingTurbo !== undefined
           ? {}
@@ -96,12 +91,12 @@ export const blockTurborepo = rootBase.createBlock({
                   tasks: {
                     build: {
                       dependsOn: ['^build'],
-                      // The build package's configs aren't a build dependency turbo can see.
+                      // Turborepo can't see that packages use the build package's configs
                       inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/packages/build/**'],
                       outputs: ['dist/**', 'lib/**', 'node_modules/.cache/tsbuild/**'],
                     },
                     test: {
-                      // Each package's tests run with the root Vitest config.
+                      // Each package's tests use the root Vitest config
                       inputs: [
                         '$TURBO_DEFAULT$',
                         `$TURBO_ROOT$/${options.vitestConfig ?? 'vitest.config.ts'}`,
@@ -117,20 +112,17 @@ export const blockTurborepo = rootBase.createBlock({
   },
 });
 
-/**
- * Orchestrates per-package `build` and `test` scripts with Nx, without Nx plugins.
- * Only active with `--task-runner nx`.
- */
 export const blockNx = rootBase.createBlock({
   about: {
     name: 'Nx',
   },
   intake({ files }) {
     const existingNx = readText(files, 'nx.json');
-    return existingNx === undefined ? undefined : { existingNx };
+    return existingNx === undefined ? readRootBuild(files) : { existingNx };
   },
   props: {
     existingNx: z.string().optional(),
+    rootBuild: z.string().optional(),
   },
   produce({ options, props }) {
     if (options.taskRunner !== 'nx') {
@@ -138,8 +130,9 @@ export const blockNx = rootBase.createBlock({
     }
 
     return {
+      suggestions: describeKeptBuild(props.rootBuild, 'nx run-many --target build'),
       extensions: [
-        // Nx's own recommendation: other .nx folders, like version plans, are tracked.
+        // Other .nx folders, such as version plans, should be tracked
         blockGitignore({ ignores: ['.nx/cache/', '.nx/workspace-data/'] }),
         blockPnpmWorkspace({
           settings: { permissions: { nx: { build: false } } },
@@ -152,7 +145,6 @@ export const blockNx = rootBase.createBlock({
           },
         }),
       ],
-      // An existing nx.json is the repository's, with its own plugins and target defaults.
       files:
         props.existingNx !== undefined
           ? {}
@@ -188,9 +180,21 @@ export const blockNx = rootBase.createBlock({
   },
 });
 
-/**
- * Fills in CTM's settings under an existing config, whose own values always win.
- */
+function readRootBuild(files: IntakeDirectory) {
+  const scripts = parseJsonText(readText(files, 'package.json')).scripts as
+    | Record<string, string>
+    | undefined;
+  return scripts?.build === undefined ? undefined : { rootBuild: scripts.build };
+}
+
+function describeKeptBuild(existing: string | undefined, ours: string) {
+  return existing === undefined || existing.includes(ours)
+    ? []
+    : [
+        `The root build script, \`${existing}\`, was kept. Change it to \`${ours}\` to use the task runner.`,
+      ];
+}
+
 function withExisting(existingText: string | undefined, ours: Record<string, unknown>) {
   return deepMerge(ours, parseJsonText(existingText));
 }

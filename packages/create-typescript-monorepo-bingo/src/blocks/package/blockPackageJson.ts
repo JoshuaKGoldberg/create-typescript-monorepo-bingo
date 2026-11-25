@@ -25,11 +25,6 @@ import { blockPnpmWorkspace } from '../root/blockPnpmWorkspace.ts';
 
 const dependenciesSchema = z.record(z.string(), z.string());
 
-/**
- * Owns a package's `package.json`. New packages get tsdown-shaped `exports` (source)
- * and `publishConfig.exports` (dist); existing ones keep theirs, since tsdown's
- * `devExports` writes them on build. Dependencies follow CTM's version and catalog rules.
- */
 export const blockPackageJson = packageBase.createBlock({
   about: {
     name: 'Package package.json',
@@ -51,10 +46,8 @@ export const blockPackageJson = packageBase.createBlock({
     const ours: Partial<Record<DependencyField, Dependencies>> = {
       dependencies: props.dependencies,
       devDependencies: {
-        // Existing packages that don't use the build package, like ones with their own
-        // tsconfig, would have it as an unused dependency.
+        // Existing packages might not use the build package, which Knip would report as unused
         ...((isNew || pkg.usesBuildPackage) && { [getBuildPackageName(options)]: 'workspace:^' }),
-        // Existing packages keep their own choice of whether to use Node.js types.
         ...(isNew && { '@types/node': pin('@types/node') }),
         ...(isNew && getSiblingToolDependencies(options, pkg)),
         ...props.devDependencies,
@@ -73,15 +66,13 @@ export const blockPackageJson = packageBase.createBlock({
 
       const result = resolveDependencies(options, field, existingField, ours[field]);
       catalogEntries.push(...result.catalogEntries);
-      // An empty field, like devDependencies an existing package never had, isn't written.
       if (Object.keys(result.dependencies).length || existingField) {
         resolved[field] = sortKeys(result.dependencies);
       }
     }
 
     const sharedHomepage = getSharedHomepage(options.packages ?? [], pkg);
-    // Where every other library has a homepage of its own, as lint rules may require,
-    // a new package gets its directory on GitHub.
+    // If other libraries all have their own homepages, lint rules may require one
     const otherLibraries = (options.packages ?? []).filter(
       (other) => other.kind === 'library' && other.directory !== pkg.directory,
     );
@@ -91,21 +82,18 @@ export const blockPackageJson = packageBase.createBlock({
         ? `${getRepositoryUrl(options)}/tree/HEAD/${pkg.directory}#readme`
         : undefined);
     const existingScripts = existing.scripts as Record<string, string> | undefined;
-    // A package's own scripts win; a task runner only adds the ones it needs.
-    // CTM's Vitest config names projects by folder, or by path where folder names repeat.
+    // CTM's Vitest config names projects by folder, or by path if folder names repeat
     const folder = pkg.directory.split('/').pop() ?? pkg.directory;
     const project = (options.packages ?? []).some(
       (other) => other.directory !== pkg.directory && other.directory.split('/').pop() === folder,
     )
       ? pkg.directory
       : folder;
-    // A repository's own Vitest config may not have CTM's per-package projects, so its
-    // packages' tests are left to it, as are other test runners'.
+    // A repository's own Vitest config may not have per-package projects
     const test =
       options.testRunner === 'other' || options.vitestConfigUnowned
         ? undefined
         : `vitest run --config ${'../'.repeat(pkg.directory.split('/').length)}vitest.config.ts --project ${project}`;
-    // Targets a package's nx project.json defines aren't repeated as scripts.
     const targets = new Set(pkg.nxTargets);
     const merged = buildsPerPackage(options)
       ? mergeScripts(existingScripts, {
@@ -113,8 +101,7 @@ export const blockPackageJson = packageBase.createBlock({
           ...(usesTaskRunner(options) && test && !targets.has('test') && { test }),
         })
       : existingScripts;
-    // A test script just as CTM writes it is CTM's: its project name follows the Vitest
-    // config's, which changes as packages with the same folder name come and go.
+    // CTM's project names change as packages with the same folder name come and go
     const scripts =
       test && merged?.test !== undefined && isCTMTestScript(merged.test, test)
         ? { ...merged, test }
@@ -130,7 +117,6 @@ export const blockPackageJson = packageBase.createBlock({
           },
           license: 'MIT',
           author: getAuthor(options),
-          // A homepage every other library shares, like a project website, is shared too.
           ...(homepage && { homepage }),
           sideEffects: false,
           type: 'module',
@@ -156,9 +142,7 @@ export const blockPackageJson = packageBase.createBlock({
         directory: pkg.directory,
       },
       ...resolved,
-      // An empty scripts object isn't added to a package that had none.
       ...(scripts && (Object.keys(scripts).length || existingScripts) && { scripts }),
-      // A package's own engines.node is part of what it publishes, so it's kept.
       engines: {
         node: options.nodeEngines ?? defaults.nodeEngines,
         ...(base.engines as object | undefined),
@@ -176,10 +160,6 @@ export const blockPackageJson = packageBase.createBlock({
   },
 });
 
-/**
- * Normalizes a package.json `repository`, which may be a string shorthand,
- * to an object that can hold a `directory`.
- */
 function toRepositoryObject(repository: unknown, fallbackUrl: string): Record<string, unknown> {
   if (typeof repository === 'string') {
     return { type: 'git', url: repository };
@@ -191,15 +171,14 @@ function toRepositoryObject(repository: unknown, fallbackUrl: string): Record<st
 }
 
 /**
- * Finds the tsdown and vitest devDependencies most other libraries declare themselves,
- * as some repositories' lint rules require, so a new package declares them the same way.
+ * Finds tools most other libraries declare, as some repositories' lint rules require.
  */
 function getSiblingToolDependencies(options: RootOptions, pkg: PackageSpec) {
   const tools = options.testRunner === 'other' ? ['tsdown'] : ['tsdown', 'vitest'];
 
   return Object.fromEntries(
     tools.flatMap((tool) => {
-      // Packages CTM doesn't build, like ones built with tsc, still test like the rest.
+      // Packages that aren't built with tsdown may still use Vitest
       const kinds = tool === 'vitest' ? ['library', 'repo-owned'] : ['library'];
       const others = (options.packages ?? []).filter(
         (other) => kinds.includes(other.kind) && other.directory !== pkg.directory,
@@ -214,7 +193,7 @@ function getSiblingToolDependencies(options: RootOptions, pkg: PackageSpec) {
         counts.set(specifier, (counts.get(specifier) ?? 0) + 1);
       }
       const specifier = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? specifiers[0];
-      // A tsdown older than the one the build package's base is written for can't build it.
+      // The build package's base needs at least CTM's tsdown version
       const minimum =
         specifier && semver.validRange(specifier) ? semver.minVersion(specifier) : undefined;
       if (tool === 'tsdown' && minimum && semver.lt(minimum, pin('tsdown'))) {
@@ -226,18 +205,13 @@ function getSiblingToolDependencies(options: RootOptions, pkg: PackageSpec) {
   );
 }
 
-/**
- * Whether a test script is the one CTM writes for a package, apart from its project name.
- */
 function isCTMTestScript(script: string, ours: string) {
   const withoutProject = (text: string) => text.replace(/ --project \S+$/, '');
   return /--project \S+$/.test(script) && withoutProject(script) === withoutProject(ours);
 }
 
 /**
- * Finds a homepage that every other library package shares, like a project website.
- * One sibling isn't enough to tell, and a homepage naming a package, like its readme's
- * URL, belongs to that package.
+ * Finds a homepage shared by all other libraries, such as a project website.
  */
 function getSharedHomepage(packages: PackageSpec[], pkg: PackageSpec) {
   const others = packages.filter(
@@ -252,9 +226,9 @@ function getSharedHomepage(packages: PackageSpec[], pkg: PackageSpec) {
     other.directory.split('/').pop() ?? other.directory,
     other.name.split('/').pop() ?? other.name,
   ]);
-  // Compared by whole URL path segments, so a site like bingo.js.org isn't ruled out.
-  // A GitHub repository's owner and name, as in its readme's URL, don't name a package.
+  // A GitHub repository's name shouldn't count as a package's
   const path = homepage.replace(/^https?:\/\/github\.com\/[^/]+\/[^/#?]+/, '');
+  // Whole segments are compared so that sites such as bingo.js.org aren't ruled out
   const segments = new Set(path.replace(/^\w+:\/\/[^/]*/, '').split(/[/#?]/));
   return names.some((name) => segments.has(name)) ? undefined : homepage;
 }

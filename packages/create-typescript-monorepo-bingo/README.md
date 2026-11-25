@@ -6,11 +6,11 @@ Quickstart-friendly TypeScript monorepo template with comprehensive, configurabl
 npx create-typescript-monorepo-bingo
 ```
 
-See the [repository README](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo#readme) for usage and options.
+See [github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo](https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo#readme) for documentation.
 
 ## API
 
-The template and its Blocks are exported for use with [Bingo](https://create.bingo) APIs:
+You can use the template with [Bingo](https://create.bingo)'s APIs:
 
 ```ts
 import { produceTemplate } from 'bingo';

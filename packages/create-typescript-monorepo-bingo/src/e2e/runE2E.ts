@@ -1,12 +1,13 @@
 // cspell:ignore widgetco zentrix zorbix
 
 /**
- * End-to-end tests: produces real repositories with the template, installs them,
- * runs every CI check in them, and verifies a second transition changes nothing.
+ * Produces repositories with the template, runs CI checks in them, and verifies that a second
+ * transition changes nothing.
  *
- * Usage: `pnpm e2e [scenario names...]`, from the repository root.
- * Set CTM_E2E_BINGO to a bingo checkout to include the bingo scenarios,
- * and CTM_E2E_BINGO_REF to the git ref to test (by default, HEAD).
+ * Usage: `pnpm e2e [scenario names...]`
+ *
+ * Set `CTM_E2E_BINGO` or `CTM_E2E_EMOJI` to a checkout of Bingo or emoji-platform-data to include
+ * its scenarios, and optionally the same with `_REF` to the Git ref to test (by default, `HEAD`).
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -26,10 +27,6 @@ type Step = { cli: string[] } | { mode: Mode; options?: Partial<RootOptions> };
 interface Scenario {
   checks: string[];
   name: string;
-
-  /**
-   * Repository to copy (with git archive) as the starting point.
-   */
   source?: { directory: string; ref: string };
   steps: Step[];
 }
@@ -38,7 +35,7 @@ const newRepository = {
   author: 'Ex Ample',
   description: 'An example monorepo.',
   email: 'ex@example.com',
-  // Not dictionary words, as spell checking must allow.
+  // Not a dictionary word, to test spell checking
   owner: 'widgetco-labs',
   repository: 'example',
   title: 'Example',
@@ -61,10 +58,20 @@ const allChecks = [
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../../../..');
 const bin = path.join(import.meta.dirname, '../bin/index.ts');
-const bingoSource = process.env.CTM_E2E_BINGO && {
-  directory: process.env.CTM_E2E_BINGO,
-  ref: process.env.CTM_E2E_BINGO_REF ?? 'HEAD',
-};
+const bingoSource = getSource('CTM_E2E_BINGO');
+const emojiSource = getSource('CTM_E2E_EMOJI');
+
+// emoji-platform-data's tests load its built packages
+const emojiChecks = [
+  'pnpm build',
+  'pnpm tsc',
+  'pnpm lint',
+  'pnpm lint:knip',
+  'pnpm lint:packages',
+  'pnpm lint:spelling',
+  'pnpm test run --testTimeout=30000',
+  'pnpm format --list-different',
+];
 
 const scenarios: Scenario[] = [
   {
@@ -92,7 +99,7 @@ const scenarios: Scenario[] = [
     checks: allChecks.filter(
       (check) => check !== 'pnpm lint' && check !== 'pnpm format --list-different',
     ),
-    // Choices later transitions, which aren't given them, have to remember.
+    // Later transitions aren't given these options and have to remember them
     name: 'opted-out',
     steps: [
       { mode: 'setup', options: { ...newRepository, formatter: 'none', linter: 'none' } },
@@ -101,7 +108,6 @@ const scenarios: Scenario[] = [
   },
   {
     checks: allChecks,
-    // Repeated folder names across parents, and a package in a top-level directory.
     name: 'multi-parent',
     steps: [
       {
@@ -138,7 +144,6 @@ const scenarios: Scenario[] = [
       'pnpm knip',
       'pnpm lint:spelling',
     ],
-    // A new package whose folder name another parent already has renames both projects.
     name: 'multi-parent-turbo',
     steps: [
       {
@@ -262,6 +267,24 @@ const scenarios: Scenario[] = [
         },
       ]
     : []),
+  ...(emojiSource
+    ? [
+        {
+          checks: emojiChecks,
+          name: 'emoji-platform-data',
+          source: emojiSource,
+          steps: [{ mode: 'transition' as const }],
+        },
+        {
+          checks: emojiChecks,
+          name: 'emoji-platform-data-add-package',
+          source: emojiSource,
+          steps: [
+            { mode: 'transition' as const, options: { newPackage: '@emoji-platform-data/zorbix' } },
+          ],
+        },
+      ]
+    : []),
 ];
 
 const requested = process.argv.slice(2);
@@ -271,7 +294,7 @@ const selected = requested.length
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ctm-e2e-'));
 
-// Keeps nx from writing to the user's own ~/.nx, or leaving a daemon running.
+// Keeps Nx from writing to ~/.nx or leaving a daemon running
 process.env.NX_CACHE_DIRECTORY = path.join(workspace, '.nx/cache');
 process.env.NX_DAEMON = 'false';
 process.env.NX_NO_CLOUD = 'true';
@@ -302,11 +325,16 @@ if (results.some(({ failures }) => failures.length)) {
   process.exitCode = 1;
 }
 
+function getSource(variable: string) {
+  const directory = process.env[variable];
+  return directory && { directory, ref: process.env[`${variable}_REF`] ?? 'HEAD' };
+}
+
 async function runScenario(scenario: Scenario): Promise<string[]> {
   const directory = path.join(workspace, scenario.name);
   const failures: string[] = [];
 
-  // The CLI's setup mode creates the directory itself, and refuses existing ones.
+  // The CLI's setup mode refuses existing directories
   const firstStep = scenario.steps.at(0);
   if (!firstStep || !('cli' in firstStep)) {
     await fs.mkdir(directory, { recursive: true });
@@ -347,8 +375,7 @@ async function runScenario(scenario: Scenario): Promise<string[]> {
     }
   }
 
-  // Builds may write ignored outputs, but shouldn't change files the repository tracks,
-  // as tsdown's devExports would if a package's exports didn't match what it generates.
+  // Builds shouldn't change tracked files, such as through tsdown's devExports
   const changedByChecks = git(directory, ['status', '--porcelain']).trim();
   if (changedByChecks) {
     console.log('  ✗ checks leave tracked files unchanged');
@@ -407,8 +434,7 @@ async function produce(directory: string, step: Step) {
 }
 
 /**
- * Finds built declaration files with more `any` types than their package's sources,
- * which tsdown can emit silently when a referenced package's types weren't built first.
+ * Declarations can contain `any`s if a referenced package's types weren't built first.
  */
 async function findAnyInDeclarations(directory: string) {
   const leaks: string[] = [];

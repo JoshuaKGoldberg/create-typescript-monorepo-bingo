@@ -95,7 +95,7 @@ describe(produceMonorepo, () => {
       options,
     });
 
-    // Repository-owned files, like docs and starter sources, aren't written again.
+    // Repository-owned files, such as docs and starter sources, aren't written again
     const transitionFiles = listFiles(transition.files ?? {});
     expect(transitionFiles.length).toBeGreaterThan(30);
     for (const file of transitionFiles) {
@@ -117,7 +117,7 @@ describe(produceMonorepo, () => {
       { path: './packages/second' },
     ]);
 
-    // @types/node comes from the package blocks; its catalog entry must reach the root.
+    // The package Blocks' catalog entry must reach the root
     expect(readFile(creation.files, 'pnpm-workspace.yaml')).toContain("'@types/node':");
     expect(readFile(creation.files, 'packages/second/package.json')).toContain(
       '"@types/node": "catalog:dev"',

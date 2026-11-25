@@ -1,8 +1,7 @@
+import type { RootOptions } from '../options.ts';
+
 /**
- * Versions of the GitHub Actions that CTM writes into workflows, pinned to commit SHAs
- * (as Renovate's best practices and zizmor expect) with the version as a comment.
- * CTM's own `.github/renovate.json` has a custom regex manager for this file, so
- * Renovate updates both the version and the digest.
+ * Renovate keeps these up-to-date with a custom manager in `.github/renovate.json`.
  */
 const actionVersions: Partial<Record<string, readonly [version: string, digest: string]>> = {
   'actions/checkout': ['v7.0.1', '3d3c42e5aac5ba805825da76410c181273ba90b1'], // renovate: datasource=github-tags depName=actions/checkout
@@ -23,8 +22,7 @@ const actionVersions: Partial<Record<string, readonly [version: string, digest: 
 };
 
 /**
- * Gets a `uses:` reference for a GitHub Action, pinned to CTM's commit SHA.
- * {@link annotateActionVersions} adds the version as a comment once it's in YAML.
+ * Version comments are added by {@link annotateActionVersions}.
  */
 export function action(name: string, subpath = ''): string {
   const pinned = actionVersions[name];
@@ -36,8 +34,22 @@ export function action(name: string, subpath = ''): string {
 }
 
 /**
- * Adds `# vX.Y.Z` comments after SHA-pinned `uses:` references in generated YAML.
+ * A repository's own setup action won't have the inputs of CTM's.
  */
+export function createSetupSteps(
+  options: RootOptions,
+  inputs?: Record<string, unknown>,
+): { uses: string; with?: Record<string, unknown> }[] {
+  if (options.setupAction && (!inputs || options.setupAction === 'setup')) {
+    return [
+      { uses: action('actions/checkout'), with: { 'persist-credentials': false } },
+      { uses: `./.github/actions/${options.setupAction}`, ...(inputs && { with: inputs }) },
+    ];
+  }
+
+  return [{ uses: '$/.github/actions/setup', ...(inputs && { with: inputs }) }];
+}
+
 export function annotateActionVersions(yaml: string): string {
   return yaml.replaceAll(
     /^([ \t-]*uses: )([\w.-]+\/[\w.-]+)((?:\/[\w.-]+)*)@([0-9a-f]{40})$/gm,

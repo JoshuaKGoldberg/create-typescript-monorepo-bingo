@@ -15,7 +15,7 @@ import {
   withoutAlternate,
 } from '../../utils/files.ts';
 import { hasSameKeyOrder, hasSortedKeys, sortKeys } from '../../utils/json.ts';
-import { mergeList } from '../../utils/lists.ts';
+import { compareCodeUnits, mergeList } from '../../utils/lists.ts';
 import { getPackageGlobs } from '../../utils/options.ts';
 import { pinned } from '../../utils/pins.ts';
 import {
@@ -26,16 +26,11 @@ import {
 import { getMinimumVersion } from '../../utils/versions.ts';
 import { blockGitHubActionsCI, type WorkflowStep } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
+import { blockRootTSConfig } from './blockRootTSConfig.ts';
 import { blockVSCode } from './blockVSCode.ts';
 
 const baseIgnores = ['**/*.snap', '**/node_modules', 'coverage', 'pnpm-lock.yaml'];
 
-/**
- * Owns the root flat `eslint.config.ts`: typescript-eslint with `projectService`,
- * plus plugins for comments, JSDoc, regular expressions, sorting, JSON, YAML,
- * Markdown, package.json files and Vitest tests.
- * Ignores in an existing config are kept.
- */
 export const blockESLint = rootBase.createBlock({
   about: {
     name: 'ESLint',
@@ -43,7 +38,7 @@ export const blockESLint = rootBase.createBlock({
   intake({ files, options }) {
     const alternate = findAlternateConfig(files, 'eslint');
     const existing = readText(files, 'eslint.config.ts');
-    // ESLint 10 can't read legacy configs, so they're replaced, with a suggestion to delete.
+    // ESLint 10 can't read legacy configs
     const legacy = [
       '.eslintrc',
       '.eslintrc.cjs',
@@ -57,7 +52,6 @@ export const blockESLint = rootBase.createBlock({
     const eslintSpecifier = [rootManifest.devDependencies, rootManifest.dependencies]
       .map((dependencies) => (dependencies as Record<string, string> | undefined)?.eslint)
       .find((specifier) => specifier !== undefined);
-    // CTM's flat config, plugins and typed linting need ESLint 9 or newer.
     const eslintMinimum = getMinimumVersion(
       'eslint',
       eslintSpecifier,
@@ -77,8 +71,7 @@ export const blockESLint = rootBase.createBlock({
         packageJsonRulesOff,
         getUntypedFiles(options),
       ),
-      // Without Vitest, CTM's own Vitest entry and import are dropped, but only as CTM wrote
-      // them: a repository's own entry for test files, like one for Jest, stays.
+      // Only CTM's own Vitest entry is dropped, so that entries for other test runners stay
       {
         configs: [previousVitestConfigEntry, ...(vitest ? [] : [vitestConfigEntry])],
         imports: vitest ? [] : [vitestImport],
@@ -87,7 +80,6 @@ export const blockESLint = rootBase.createBlock({
     );
     return {
       ...(alternate && { alternate }),
-      // A repository adopting ESLint, which may not meet CTM's strict rules yet.
       ...(existing === undefined &&
         !alternate &&
         !legacy &&
@@ -99,7 +91,6 @@ export const blockESLint = rootBase.createBlock({
       ...(existingIgnores && { existingIgnores }),
       ...(extras && { extras }),
       ...(existing !== undefined && !isParseable(existing) && { unparseable: true }),
-      // A config CTM didn't create is the repository's, like the other owned files.
       ...(!isOwnedFile(existing) && { unowned: true }),
       ...(legacy && { legacy }),
     };
@@ -141,7 +132,7 @@ export const blockESLint = rootBase.createBlock({
       return props.managed
         ? {
             suggestions: [
-              'ESLint is turned off, so CTM no longer updates eslint.config.ts. To remove ESLint, delete it, along with the lint script, CI job, and the dependencies Knip then reports as unused.',
+              'ESLint is turned off, so eslint.config.ts is no longer updated. You may want to delete it and its CI job, dependencies, and script.',
             ],
           }
         : {};
@@ -152,14 +143,16 @@ export const blockESLint = rootBase.createBlock({
     if (props.oldESLint) {
       return {
         suggestions: [
-          `This repository uses ESLint ${props.oldESLint}, so CTM didn't set up its ESLint config, which needs ESLint 9 or newer. Update ESLint and re-run to add it.`,
+          `ESLint ${props.oldESLint} is older than 9, so eslint.config.ts wasn't added. Update ESLint and re-run to add it.`,
         ],
       };
     }
 
     if (props.unowned) {
       return {
-        suggestions: [describeUnownedFile('eslint.config.ts')],
+        suggestions: [
+          `${describeUnownedFile('eslint.config.ts')} Entries like the template's own are replaced, so move any of their other rules to separate entries first.`,
+        ],
       };
     }
 
@@ -170,7 +163,6 @@ export const blockESLint = rootBase.createBlock({
       ...(props.ignores ?? []),
     ]);
 
-    // Existing entries and comments stay exactly as written; new ones go after the last entry.
     const existingValues = new Set(props.existingIgnores?.values);
     const quote = (ignore: string) => `'${ignore.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
     const added = ignores.filter((ignore) => !existingValues.has(ignore)).map(quote);
@@ -186,7 +178,7 @@ export const blockESLint = rootBase.createBlock({
       suggestions: [
         ...(props.adopting
           ? [
-              "CTM added ESLint with strict, type-aware rules, which existing code may not meet yet. Re-run with `--linter none` to go without it, after undoing these changes. Otherwise, run `pnpm lint --fix`, then `pnpm exec eslint --suppress-all` to record what's left as ESLint bulk suppressions to fix over time. Files no tsconfig includes, like test files a tsconfig excludes, need one that includes them for typed linting.",
+              'ESLint was added with strict rules. Files must be included in a tsconfig.json for typed linting. See https://github.com/JoshuaKGoldberg/create-typescript-monorepo-bingo/blob/main/docs/FAQs.md#how-can-i-suppress-existing-eslint-complaints.',
             ]
           : []),
         ...(props.unparseable
@@ -196,7 +188,7 @@ export const blockESLint = rootBase.createBlock({
           : []),
         ...(props.legacy
           ? [
-              `ESLint 10 doesn't read ${props.legacy}: move its settings into eslint.config.ts, then delete it.`,
+              `ESLint 10 doesn't support ${props.legacy}. Move its settings into eslint.config.ts, then delete it.`,
             ]
           : []),
       ],
@@ -215,7 +207,7 @@ export const blockESLint = rootBase.createBlock({
             '@eslint-community/eslint-plugin-eslint-comments',
             '@eslint/js',
             '@eslint/markdown',
-            // Vitest's rules would rewrite other test runners' imports, like node:test's.
+            // Vitest's rules would rewrite other test runners' imports, such as node:test's
             ...(vitest ? ['@vitest/eslint-plugin' as const] : []),
             'eslint',
             'eslint-plugin-jsdoc',
@@ -229,6 +221,7 @@ export const blockESLint = rootBase.createBlock({
           ),
           scripts: { lint: 'eslint . --max-warnings 0' },
         }),
+        blockRootTSConfig({ addsConfigFiles: true }),
         blockVSCode({
           extensions: ['dbaeumer.vscode-eslint'],
           settings: {
@@ -246,14 +239,13 @@ export const blockESLint = rootBase.createBlock({
         }),
       ],
       files: {
-        // A config that doesn't parse is left as it is, rather than lose what can't be read.
         ...(!props.unparseable && {
           'eslint.config.ts': createESLintConfig(
             ignoresText,
             workflowExtension,
             props.extras,
             vitest,
-            // Biome sorts imports and exports itself, in its own order.
+            // Biome sorts imports and exports in its own order
             options.formatter !== 'biome',
             props.packageJsonRulesOff,
             getUntypedFiles(options),
@@ -265,8 +257,7 @@ export const blockESLint = rootBase.createBlock({
 });
 
 /**
- * Names CTM gives entries it only sometimes writes, so they're told apart from a
- * repository's own entries for the same files, and dropped once CTM no longer writes them.
+ * Distinguishes entries that CTM sometimes writes from the repository's own.
  */
 const ownEntryPrefix = 'create-typescript-monorepo-bingo/';
 
@@ -283,9 +274,7 @@ const vitestConfigEntry = `{
     settings: { vitest: { typecheck: true } },
   }`;
 
-/**
- * The entry as CTM wrote it before, which is replaced rather than kept as a repository's.
- */
+// Older versions of CTM wrote this entry, so it's replaced rather than kept
 const previousVitestConfigEntry = `{
     extends: [vitest.configs.recommended],
     files: ['**/*.test.*'],
@@ -315,9 +304,14 @@ const ownImports = [
   ['typescript-eslint', "import tseslint from 'typescript-eslint';"],
 ] as const;
 
+const importPattern = /^import [^\n]* from ['"]([^'"\n]+)['"];?$/;
+
+function getModule(line: string) {
+  return importPattern.exec(line)?.[1] ?? '';
+}
+
 /**
- * Creates CTM's flat ESLint config. Config entries and imports a repository added are
- * kept after CTM's own; edits inside CTM's own entries are replaced on transition.
+ * Changes to CTM's own entries are replaced, but added entries and imports are kept.
  */
 function createESLintConfig(
   ignoresText: string,
@@ -340,14 +334,17 @@ function createESLintConfig(
   if (!vitest) {
     replaced.add('@vitest/eslint-plugin');
   }
+  const imports = [
+    ...ownImports.filter(([module]) => !replaced.has(module)).map(([, line]) => line),
+    ...(extras?.imports ?? []),
+  ];
+  // Existing lint rules may sort imports, while other layouts are kept
+  if (imports.every((line) => importPattern.test(line))) {
+    imports.sort((a, b) => compareCodeUnits(getModule(a), getModule(b)));
+  }
   return `${ownedFileMarker}
 
-${extras?.header.filter((comment) => comment !== ownedFileMarker).length ? `${extras.header.filter((comment) => comment !== ownedFileMarker).join('\n')}\n\n` : ''}${ownImports
-    .filter(([module]) => !replaced.has(module))
-    .map(([, line]) => `${line}\n`)
-    .join(
-      '',
-    )}${extras?.imports.length ? `${extras.imports.join('\n')}\n` : ''}${extras?.statements.length ? `\n${extras.statements.join('\n\n')}\n` : ''}
+${extras?.header.filter((comment) => comment !== ownedFileMarker).length ? `${extras.header.filter((comment) => comment !== ownedFileMarker).join('\n')}\n\n` : ''}${imports.map((line) => `${line}\n`).join('')}${extras?.statements.length ? `\n${extras.statements.join('\n\n')}\n` : ''}
 ${extras?.exportComments.length ? `${extras.exportComments.join('\n')}\n` : ''}export default defineConfig(
   {
     ignores: [${ignoresText}],
@@ -383,8 +380,8 @@ ${extras?.exportComments.length ? `${extras.exportComments.join('\n')}\n` : ''}e
       'no-restricted-syntax': [
         'error',
         {
-          selector: 'ExportAllDeclaration[exported=null]',
           message: "Do not use 'export * from' statements. Please export individual symbols.",
+          selector: 'ExportAllDeclaration[exported=null]',
         },
       ],
 ${
@@ -395,7 +392,7 @@ ${
 `
     : ''
 }
-      // Stylistic concerns that don't interfere with Oxfmt
+      // Stylistic concerns that don't interfere with formatters
       'logical-assignment-operators': ['error', 'always', { enforceForIfStatements: true }],
       'no-useless-rename': 'error',
       'object-shorthand': 'error',
@@ -414,7 +411,7 @@ ${
 ${
   untypedFiles.length
     ? `  {
-    // Config files no tsconfig includes, with the repository's TypeScript kept as it is
+    // Config files that aren't in any tsconfig.json
     extends: [tseslint.configs.disableTypeChecked],
     files: [${untypedFiles.map((file) => `'${file}'`).join(', ')}],
     name: '${ownEntryPrefix}untyped-config-files',
@@ -424,7 +421,7 @@ ${
 }${
     packageJsonRulesOff.length
       ? `  {
-    // Fields existing packages don't have, which CTM doesn't fill in for them
+    // Rules that existing package.json files don't meet yet
     files: ['**/package.json'],
     name: '${ownEntryPrefix}missing-package-fields',
     rules: {
@@ -490,10 +487,6 @@ function insertIgnores(
   return `${withComma.slice(0, at)}${insertion}${withComma.slice(at)}`;
 }
 
-/**
- * The package.json fields eslint-plugin-package-json's recommended config requires, and
- * whether its rule also checks private packages.
- */
 const requiredFields: [
   rule: string,
   has: (manifest: Record<string, unknown>) => boolean,
@@ -512,7 +505,7 @@ const requiredFields: [
 ];
 
 /**
- * Gets config files CTM doesn't add to any tsconfig, where it leaves the root's alone.
+ * Gets config files that aren't in any tsconfig.
  */
 function getUntypedFiles(options: RootOptions): string[] {
   return options.buildPackageSkipped
@@ -521,8 +514,7 @@ function getUntypedFiles(options: RootOptions): string[] {
 }
 
 /**
- * Whether CTM's Vitest lint rules stay where CTM otherwise leaves tests alone: packages
- * still test with Vitest, only without a root config.
+ * Whether to keep Vitest lint rules because packages use it without a root config.
  */
 function keepsVitestLint(
   files: IntakeDirectory,
@@ -532,7 +524,6 @@ function keepsVitestLint(
   const hasRootConfig =
     readText(files, 'vitest.config.ts') !== undefined || options.vitestConfig !== undefined;
   return (
-    // As CTM imports it: a repository's own Vitest rules don't need CTM's too.
     /import vitest from ['"]@vitest\/eslint-plugin['"]/.test(existing ?? '') &&
     !hasRootConfig &&
     ['.', ...(options.packages ?? []).map((pkg) => pkg.directory)].some((directory) => {
@@ -544,7 +535,7 @@ function keepsVitestLint(
 }
 
 /**
- * Collections package-json/sort-collections checks, apart from dependencies, which CTM sorts.
+ * Collections checked by package-json/sort-collections, except dependencies.
  */
 const sortedCollections = ['config', 'exports', 'overrides', 'peerDependenciesMeta', 'scripts'];
 
@@ -553,9 +544,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Finds the required package.json fields existing packages lack and CTM doesn't fill in,
- * like a library's sideEffects, whose rules would otherwise fail on adoption. CTM fills in
- * the root's description and repository, and its libraries' names and repositories.
+ * Finds package.json lint rules that existing packages would fail.
  */
 function findMissingPackageFields(files: IntakeDirectory, options: RootOptions): string[] {
   const manifests = [
@@ -569,7 +558,7 @@ function findMissingPackageFields(files: IntakeDirectory, options: RootOptions):
     return text === undefined ? [] : [{ filled, manifest: parseJsonText(text) }];
   });
 
-  // CTM keeps unsorted keys in the order they were, which these rules check.
+  // These rules would report on unsorted keys, which CTM doesn't reorder
   const unsortedKeys = manifests.some(({ manifest }) => !hasSortedKeys(manifest));
   const unsortedCollections = manifests.some(({ manifest }) =>
     sortedCollections.some(

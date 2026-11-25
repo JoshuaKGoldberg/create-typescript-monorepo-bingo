@@ -1,12 +1,11 @@
 import { z } from 'zod';
 
 /**
- * What kind of workspace package a directory holds, which decides what CTM writes for it.
- * - `library`: a tsdown-built TypeScript package, which gets the full package preset.
- * - `bin-js`: a JavaScript-only bin package, which CTM leaves alone apart from listing it.
- * - `build`: the shared `@&lt;scope>/build` package, owned by the root Build block.
- * - `site`: a docs site, which is repo-owned.
- * - `repo-owned`: anything else CTM shouldn't touch.
+ * - `library`: built with tsdown, and managed by CTM
+ * - `bin-js`: a JavaScript-only bin, and left alone
+ * - `build`: the shared build package
+ * - `site`: a docs site
+ * - `repo-owned`: anything else, and left alone
  */
 export const packageKinds = ['library', 'bin-js', 'build', 'site', 'repo-owned'] as const;
 
@@ -19,27 +18,11 @@ export const packageSpecSchema = z.object({
   isolatedDeclarations: z.boolean().optional(),
   kind: z.enum(packageKinds),
   name: z.string(),
-
-  /**
-   * Targets the package's nx project.json defines, which scripts needn't repeat.
-   */
   nxTargets: z.array(z.string()).optional(),
   scripts: z.array(z.string()).optional(),
-
-  /**
-   * The package's own tsdown and vitest devDependency specifiers, for new packages to match.
-   */
   toolDevDependencies: z.record(z.string(), z.string()).optional(),
   tsdownWorkspaceReady: z.boolean().optional(),
-
-  /**
-   * Whether an existing package's tsconfig extends the build package's base.
-   */
   extendsBuildTSConfig: z.boolean().optional(),
-
-  /**
-   * Whether an existing package uses the build package's tsconfig or tsdown base.
-   */
   usesBuildPackage: z.boolean().optional(),
   workspaceDependencies: z.array(z.string()).optional(),
 });
@@ -55,8 +38,7 @@ export const taskRunners = ['none', 'pnpm', 'turbo', 'nx'] as const;
 export type TaskRunner = (typeof taskRunners)[number];
 
 /**
- * Creates a schema for one of several strings. bingo's CLI parses `--flag value` for
- * unions of literals, but not for `z.enum`, which it only reads as `--flag=value`.
+ * Bingo's CLI only parses `--flag value` for unions of literals, not `z.enum`s.
  */
 function literalUnion<const Values extends readonly [string, string, ...string[]]>(values: Values) {
   const [first, second, ...rest] = values.map((value) => z.literal(value));
@@ -67,100 +49,88 @@ function literalUnion<const Values extends readonly [string, string, ...string[]
 }
 
 /**
- * Options for the repository as a whole.
- * None use `.default(...)`, because bingo prompts for defaulted schemas;
- * `prepare()` infers values and blocks fall back to the documented defaults.
+ * These don't use `.default()` because Bingo would prompt for them.
  */
 export const rootOptionsShape = {
   author: z.string().optional().describe('author name for package.json files'),
   catalogExcluded: z
     .array(z.string())
     .optional()
-    .describe('dependencies (as `<catalog>:<name>`) to leave out of catalogs'),
+    .describe('`<catalog>:<dependency>` pairs to keep out of catalogs'),
   catalogs: literalUnion(catalogModes)
     .optional()
-    .describe("pnpm catalogs to manage: 'none', 'default' (shared deps), or 'named' (by field)"),
+    .describe("pnpm catalogs mode: 'default', 'named', or 'none'"),
   catalogShared: z
     .array(z.string())
     .optional()
-    .describe('dependencies to put in the default catalog, in default mode'),
-  description: z.string().describe('sentence-case description of the repository'),
+    .describe('dependencies to put in the default catalog'),
+  description: z.string().describe("'Sentence case.' description of the repository"),
   directory: z.string().optional().describe('directory to create the repository in'),
   email: z.string().optional().describe('author email for package.json files'),
   formatter: literalUnion(['oxfmt', 'prettier', 'biome', 'none'] as const)
     .optional()
     .describe(
-      "formatter: 'oxfmt', 'prettier' or 'biome' for repositories that already use them, or 'none'",
+      "formatter to use: 'biome' (existing repositories only), 'none', 'oxfmt', or 'prettier'",
     ),
   linter: literalUnion(['eslint', 'none'] as const)
     .optional()
-    .describe("linter: 'eslint', or 'none' to not set up ESLint"),
-  newPackage: z
-    .string()
-    .optional()
-    .describe('name of a new package to add under packages/, such as "my-lib"'),
+    .describe("linter to use: 'eslint' or 'none'"),
+  newPackage: z.string().optional().describe('name of a package to add under packages/'),
   newPackageDescription: z
     .string()
     .optional()
-    .describe('sentence-case description of the --new-package'),
+    .describe("'Sentence case.' description of the --newPackage"),
   node: z.string().optional().describe('Node.js version for .nvmrc and CI'),
-  nodeEngines: z.string().optional().describe('engines.node range for package.json files'),
-  owner: z.string().describe('GitHub organization or user the repository is underneath'),
+  nodeEngines: z.string().optional().describe('Node.js range for engines.node'),
+  owner: z.string().describe('organization or user owning the repository'),
   packages: z.array(packageSpecSchema).optional().describe('workspace packages'),
-  pnpm: z.string().optional().describe('pnpm version for packageManager'),
-  releaseApp: z
+  pnpm: z.string().optional().describe("pnpm version for package.json's packageManager field"),
+  releaseApp: z.string().optional().describe("prefix of the GitHub App's variable and secret"),
+  repository: z.string().describe("'kebab-case' name of the repository"),
+  scope: z.string().optional().describe('npm scope for the private build package'),
+  setupAction: z
     .string()
     .optional()
-    .describe('prefix of the GitHub App variable and secret used for releases'),
-  repository: z.string().describe("'kebab-case' name of the repository"),
-  scope: z.string().optional().describe("npm scope for the private build package, like '@my'"),
+    .describe("name of the repository's own GitHub Action that installs dependencies"),
   taskRunner: literalUnion(taskRunners)
     .optional()
-    .describe("task runner to orchestrate scripts: 'none', 'pnpm', 'turbo', or 'nx'"),
+    .describe("task runner to use: 'none', 'nx', 'pnpm', or 'turbo'"),
   rootTSConfigExtended: z
     .boolean()
     .optional()
-    .describe("inferred: packages extend the root tsconfig.json, so it's left as it is"),
+    .describe('whether packages extend the root tsconfig.json'),
   recursiveBuild: z
     .boolean()
     .optional()
-    .describe("whether the root build script runs each package's own build script"),
+    .describe("whether the root build script runs packages' build scripts"),
   testRunner: literalUnion(['vitest', 'other'] as const)
     .optional()
-    .describe("'vitest', or 'other' for repositories that test with something else"),
+    .describe("test runner to use: 'vitest', or 'other' to leave existing tests alone"),
   title: z.string().describe("'Title Case' title for the repository"),
-  typescript7Alias: z
-    .string()
-    .optional()
-    .describe('dependency name that aliases TypeScript 7 for the tsc binary'),
-  buildPackageSkipped: z
-    .boolean()
-    .optional()
-    .describe("inferred: TypeScript is kept, so there's no build package to add"),
+  typescript7Alias: z.string().optional().describe('dependency name that aliases TypeScript 7'),
+  buildPackageSkipped: z.boolean().optional().describe('whether to skip adding the build package'),
   typescriptKept: z
     .boolean()
     .optional()
-    .describe("inferred: the repository's TypeScript can't become CTM's aliases"),
+    .describe('whether to keep the existing TypeScript version'),
   vitestConfigUnowned: z
     .boolean()
     .optional()
-    .describe("whether the root Vitest config is the repository's own, not CTM's"),
-  vitestConfig: z
-    .string()
-    .optional()
-    .describe('file name of the root Vitest config, if not vitest.config.ts'),
+    .describe("whether the root Vitest config is the repository's own"),
+  vitestConfig: z.string().optional().describe('file name of the root Vitest config'),
   workflowExtension: literalUnion(['yaml', 'yml'] as const)
     .optional()
-    .describe('file extension for GitHub Actions workflow files'),
+    .describe("GitHub Actions file extension: 'yaml' or 'yml'"),
+  workflowKeysSorted: z
+    .boolean()
+    .optional()
+    .describe('whether existing GitHub Actions workflows have sorted keys'),
 };
 
 export type RootOptionsShape = typeof rootOptionsShape;
 
 export type RootOptions = z.infer<z.ZodObject<RootOptionsShape>>;
 
-/**
- * Options for one package's production: every root option, plus the package being produced.
- */
 export const packageOptionsShape = {
   ...rootOptionsShape,
   package: packageSpecSchema,

@@ -4,27 +4,27 @@ import { rootBase } from '../../bases/rootBase.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
 import { formatJson, withDefaults } from '../../utils/json.ts';
 import { getBuildPackageName, getPackageGlobs } from '../../utils/options.ts';
+import { emitsFiles } from '../../utils/tsconfig.ts';
 
 interface TSConfigReference {
   path: string;
 }
 
-/**
- * Owns the root `tsconfig.json`, which type checks root config files
- * and references every package for `tsc -b`.
- * Existing references keep their order; new ones are appended.
- */
 export const blockRootTSConfig = rootBase.createBlock({
   about: {
     name: 'Root TSConfig',
   },
   intake({ files }) {
     const existing = readText(files, 'tsconfig.json');
-    const rootType = parseJsonText(readText(files, 'package.json')).type;
+    const manifest = parseJsonText(readText(files, 'package.json'));
+    const rootType = manifest.type;
     return {
       ...(existing !== undefined && { existing }),
-      // Without "type": "module", NodeNext treats root config files as CommonJS, where
-      // import.meta, as in CTM's vitest.config.ts, isn't allowed.
+      ...(emitsFiles(
+        parseJsonText(existing).compilerOptions,
+        Object.values((manifest.scripts ?? {}) as Record<string, string>),
+      ) && { emits: true }),
+      // Without "type": "module", NodeNext doesn't allow import.meta in root config files
       ...(readText(files, 'package.json') !== undefined &&
         rootType !== 'module' && { rootNotModule: true }),
       ...(readText(files, 'packages/build/package.json') !== undefined && {
@@ -33,24 +33,30 @@ export const blockRootTSConfig = rootBase.createBlock({
     };
   },
   props: {
+    emits: z.boolean().optional(),
     existing: z.string().optional(),
     hasBuildPackage: z.boolean().optional(),
     include: z.array(z.string()).optional(),
     references: z.array(z.string()).optional(),
     rootNotModule: z.boolean().optional(),
+    addsConfigFiles: z.boolean().optional(),
   },
   produce({ options, props }) {
-    // A TypeScript that's kept type checks as it did, without CTM's own files.
     if (options.buildPackageSkipped) {
       return {};
     }
 
-    // Packages that extend the root tsconfig.json would inherit what CTM adds to it, like
-    // noEmit and include, so it's left as it is.
+    const hasBuildPackage =
+      !!props.hasBuildPackage || (options.packages ?? []).some((pkg) => pkg.kind === 'library');
+    if (props.existing !== undefined && !hasBuildPackage && !props.addsConfigFiles) {
+      return {};
+    }
+
+    // Packages would inherit settings added to a root tsconfig.json they extend
     if (options.rootTSConfigExtended) {
       return {
         suggestions: [
-          "Packages extend the root tsconfig.json, so CTM left it as it is and didn't add a tsc -b typecheck. Move the shared settings to a base config, like tsconfig.base.json, for CTM to manage the root tsconfig.json's project references and type checking of root config files.",
+          "The root tsconfig.json wasn't changed because packages extend it. Move its shared settings to a tsconfig.base.json and re-run to set up type checking.",
         ],
       };
     }
@@ -66,7 +72,6 @@ export const blockRootTSConfig = rootBase.createBlock({
     for (const reference of props.references ?? []) {
       if (!normalized.has(normalizePath(reference))) {
         normalized.add(normalizePath(reference));
-        // A sorted list stays sorted.
         const path = `./${normalizePath(reference)}`;
         const sorted =
           references.length > 1 &&
@@ -76,23 +81,26 @@ export const blockRootTSConfig = rootBase.createBlock({
       }
     }
 
-    const hasBuildPackage =
-      !!props.hasBuildPackage || (options.packages ?? []).some((pkg) => pkg.kind === 'library');
-
-    // A solution-style config, with no files of its own, only gets references.
+    // Solution-style configs only have references
     const isSolution = Array.isArray(existing.files) && !existing.files.length;
-    // Package config files, like tsdown.config.ts, aren't in any package's tsconfig.
-    const packageConfigGlobs = getPackageGlobs(options, '*.config.ts').map((glob) => `./${glob}`);
+    // Package config files aren't in any package's tsconfig.json
+    const packageConfigGlobs =
+      props.existing === undefined || hasBuildPackage
+        ? getPackageGlobs(options, '*.config.ts').map((glob) => `./${glob}`)
+        : [];
     const existingInclude = existing.include as string[] | undefined;
-    // Config files, like CTM's eslint.config.ts, need a tsconfig for typed linting: an
-    // existing include gets the globs for any it doesn't already cover.
+    const narrows =
+      props.existing !== undefined &&
+      !existingInclude &&
+      existing.files === undefined &&
+      hasBuildPackage;
+    // Config files need to be in a tsconfig.json for typed linting
     const configGlobs = ['./*.config.ts', ...packageConfigGlobs];
     const include = new Set([
       ...(existingInclude ?? configGlobs),
       ...(existingInclude
         ? configGlobs.filter(
             (glob) =>
-              // The config files CTM writes there, each of which needs to be covered.
               !(
                 glob === './*.config.ts'
                   ? ['eslint', 'knip', 'oxfmt', 'tsdown', 'vitest'].map(
@@ -106,44 +114,61 @@ export const blockRootTSConfig = rootBase.createBlock({
     ]);
 
     return {
-      suggestions:
-        props.rootNotModule &&
+      suggestions: [
+        ...(props.rootNotModule &&
         setsModule &&
         !/^(?:preserve|system|esnext|es202)/i.test(String(existingOptions.module))
           ? [
-              'The root package.json isn\'t "type": "module", so root config files that use import.meta, like vitest.config.ts, fail to type check with the root tsconfig.json\'s module setting. Set "module": "preserve" and "moduleResolution": "bundler" in it, or "type": "module" in package.json.',
+              'Root config files that use import.meta will fail to type check. Set "type": "module" in the root package.json, or "module": "preserve" and "moduleResolution": "bundler" in the root tsconfig.json.',
             ]
-          : [],
+          : []),
+        ...(narrows
+          ? [
+              'The root tsconfig.json now only includes config files, as packages are type checked through references. Add any other files to its include.',
+            ]
+          : []),
+      ],
       files: {
         'tsconfig.json': formatJson(
           {
-            // Only a new file extends the build package's base, and only if there is one.
             ...(props.existing === undefined &&
               hasBuildPackage && { extends: `${getBuildPackageName(options)}/tsconfig.base.json` }),
             ...existing,
-            // Existing compiler options are the repository's.
             ...(!isSolution && {
-              compilerOptions: withDefaults(
-                existing.compilerOptions as Record<string, unknown> | undefined,
-                {
-                  // Without a build package's base, a new file stands on its own.
-                  ...(props.existing === undefined &&
-                    !hasBuildPackage && {
-                      module: 'NodeNext',
-                      moduleResolution: 'NodeNext',
-                      skipLibCheck: true,
-                      strict: true,
-                      target: 'ES2022',
-                      types: ['node'],
+              ...((props.existing === undefined ||
+                existing.compilerOptions !== undefined ||
+                hasBuildPackage) && {
+                compilerOptions: withDefaults(
+                  existing.compilerOptions as Record<string, unknown> | undefined,
+                  {
+                    ...(props.existing === undefined &&
+                      !hasBuildPackage && {
+                        module: 'NodeNext',
+                        moduleResolution: 'NodeNext',
+                        skipLibCheck: true,
+                        strict: true,
+                        target: 'ES2022',
+                        types: ['node'],
+                      }),
+                    // Either one alone is an invalid combination
+                    ...(props.rootNotModule &&
+                      !setsModule && { module: 'preserve', moduleResolution: 'bundler' }),
+                    ...((props.existing === undefined || hasBuildPackage) && {
+                      ...(!props.emits && { noEmit: true }),
+                      tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.json',
                     }),
-                  // The pair goes together: either one alone is an invalid combination.
-                  ...(props.rootNotModule &&
-                    !setsModule && { module: 'preserve', moduleResolution: 'bundler' }),
-                  noEmit: true,
-                  tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.json',
-                },
-              ),
-              include: [...include],
+                  },
+                ),
+              }),
+              // Adding an include would stop other files from being checked
+              ...([
+                props.existing === undefined,
+                existingInclude,
+                existing.files,
+                hasBuildPackage,
+              ].some(Boolean) && {
+                include: [...include],
+              }),
             }),
             ...(references.length || existing.references !== undefined
               ? { references: references.map((path) => ({ path })) }
@@ -161,8 +186,7 @@ function normalizePath(path: string) {
 }
 
 /**
- * Whether a tsconfig include entry covers a file path, as TypeScript matches them:
- * `*` and `?` within a path segment, `**` across segments, and plain paths as directories.
+ * Whether a tsconfig include entry covers a file path, per TypeScript's matching.
  */
 function includeCovers(entry: string, file: string): boolean {
   const normalized = entry.replace(/^\.\//, '').replace(/\/$/, '');
@@ -170,13 +194,13 @@ function includeCovers(entry: string, file: string): boolean {
     return true;
   }
 
-  // A plain path without an extension is a directory, like src.
+  // Paths without an extension are directories
   if (!/[*?]/.test(normalized) && !/\.[cm]?[jt]sx?$/.test(normalized)) {
     return file.startsWith(`${normalized}/`);
   }
 
   const segments = normalized.split('/');
-  // A trailing ** matches every file below it, as **/* does.
+  // A trailing ** matches every file below it, as **/* does
   if (segments.at(-1) === '**') {
     segments.push('*');
   }

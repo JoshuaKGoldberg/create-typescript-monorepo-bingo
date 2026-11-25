@@ -14,11 +14,6 @@ interface TSConfig {
   references?: { path: string }[];
 }
 
-/**
- * Owns a package's `tsconfig.json`, which extends the build package's base and
- * references the workspace packages it depends on. Adds the package to the root
- * tsconfig's references, so `tsc -b` covers it.
- */
 export const blockPackageTSConfig = packageBase.createBlock({
   about: {
     name: 'Package TSConfig',
@@ -29,7 +24,7 @@ export const blockPackageTSConfig = packageBase.createBlock({
       return { existing };
     }
 
-    // An existing package without a tsconfig uses one above it, like the root's.
+    // Existing packages without a tsconfig.json use one above them
     return readText(files, 'package.json') === undefined ? undefined : { inherited: true };
   },
   props: {
@@ -44,8 +39,7 @@ export const blockPackageTSConfig = packageBase.createBlock({
 
     const existing = parseJsonText(props.existing) as TSConfig & Record<string, unknown>;
 
-    // An existing tsconfig that doesn't extend the build package's base is the repository's
-    // own, with its own settings for rootDir, references and the rest: CTM leaves it alone.
+    // Only tsconfigs that extend the build package's base are managed by CTM
     const extendsBuild = [existing.extends]
       .flat()
       .some((base) => typeof base === 'string' && base.includes('/build/tsconfig'));
@@ -53,7 +47,7 @@ export const blockPackageTSConfig = packageBase.createBlock({
       return {};
     }
 
-    // A solution-style tsconfig, with no files of its own, is the package's own layout.
+    // Solution-style tsconfigs have no files of their own
     if (
       (Array.isArray(existing.include) && !existing.include.length) ||
       (Array.isArray(existing.files) && !existing.files.length)
@@ -61,8 +55,7 @@ export const blockPackageTSConfig = packageBase.createBlock({
       return {};
     }
 
-    // Referenced packages must be composite, as tsconfigs extending the build base are,
-    // including new packages'.
+    // Referenced packages must be composite, as the build package's base is
     const libraries = new Map(
       (options.packages ?? [])
         .filter(
@@ -72,8 +65,7 @@ export const blockPackageTSConfig = packageBase.createBlock({
         )
         .map((other) => [other.name, other]),
     );
-    // A new package depends on the build package too, which tools like nx's TypeScript
-    // sync expect a reference for; existing packages keep their own references.
+    // Tools such as Nx's TypeScript sync expect a reference to the build package
     const buildPackage = (options.packages ?? []).find((other) => other.kind === 'build');
     const computed = [
       ...(props.existing === undefined && buildPackage ? [buildPackage] : []),
@@ -82,9 +74,8 @@ export const blockPackageTSConfig = packageBase.createBlock({
         .filter((dependency) => dependency !== undefined),
     ].map((dependency) => relativeTo(pkg.directory, dependency.directory));
 
-    // Existing references keep their order; newly needed ones are appended.
     const existingPaths = (existing.references ?? []).map((reference) => reference.path);
-    // A reference to ../x/tsconfig.src.json already covers ../x.
+    // A reference to ../x/tsconfig.src.json already covers ../x
     const covered = new Set(
       existingPaths.map((path) => path.replace(/\/tsconfig[^/]*\.json$/, '')),
     );
@@ -98,7 +89,6 @@ export const blockPackageTSConfig = packageBase.createBlock({
       outDir: 'lib',
       rootDir: 'src',
       tsBuildInfoFile: 'node_modules/.cache/tsbuild/info.src.json',
-      // Existing packages keep their own choice of whether to use Node.js types.
       ...(props.existing === undefined && { types: ['node'] }),
     });
 
@@ -109,13 +99,11 @@ export const blockPackageTSConfig = packageBase.createBlock({
     }
 
     return {
-      // Only new packages are added to the root references: existing ones keep the root
-      // tsconfig's choice, since some repositories leave packages out on purpose.
+      // Some repositories intentionally leave packages out of root references
       extensions:
         props.existing === undefined
           ? [
               asPackageExtension(blockRootTSConfig({ references: [pkg.directory] })),
-              // A new package needs a workspace glob that covers its directory.
               asPackageExtension(blockPnpmWorkspace({ packages: [pkg.directory] })),
             ]
           : [],

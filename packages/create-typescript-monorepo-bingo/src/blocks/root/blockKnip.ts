@@ -13,10 +13,10 @@ import {
 } from '../../utils/staticConfig.ts';
 import { blockGitHubActionsCI } from './blockGitHubActionsCI.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
+import { blockRootTSConfig } from './blockRootTSConfig.ts';
 
 /**
- * Owns `knip.config.ts`. Knip detects workspaces from `pnpm-workspace.yaml`,
- * so `workspaces` lists only exceptions. Existing settings are kept.
+ * Knip detects workspaces itself, so `workspaces` only lists exceptions.
  */
 export const blockKnip = rootBase.createBlock({
   about: {
@@ -38,8 +38,7 @@ export const blockKnip = rootBase.createBlock({
   },
   produce({ props }) {
     const existing = readConfigObject(props.existing) ?? {};
-    // A config CTM can't read back statically, or with comments, is the repository's own:
-    // CTM leaves it as it is rather than lose what it can't represent.
+    // Configs with comments or non-static values can't be printed back losslessly
     const keepExisting =
       props.existing !== undefined &&
       (!readConfigObject(props.existing) || hasComments(props.existing));
@@ -71,7 +70,6 @@ export const blockKnip = rootBase.createBlock({
       ),
     };
 
-    // A kept config still needs the ignores for dependencies CTM adds that Knip can't see used.
     const missingIgnores = keepExisting
       ? ['@changesets/cli', ...(props.ignoreDependencies ?? [])].filter(
           (dependency) => !rootIgnores?.includes(dependency),
@@ -81,7 +79,7 @@ export const blockKnip = rootBase.createBlock({
     return withoutAlternate(props.alternate, 'knip.config.ts', {
       suggestions: missingIgnores.length
         ? [
-            `knip.config.ts has comments or code CTM can't rewrite, so it was left as it is. Add these to its workspaces['.'].ignoreDependencies, which Knip can't see used: ${missingIgnores.join(', ')}.`,
+            `knip.config.ts has comments or code, so it wasn't changed. Add these to its workspaces['.'].ignoreDependencies: ${missingIgnores.join(', ')}.`,
           ]
         : [],
       extensions: [
@@ -91,6 +89,7 @@ export const blockKnip = rootBase.createBlock({
         blockRootPackageJson({
           devDependencies: pinned('knip'),
         }),
+        blockRootTSConfig({ addsConfigFiles: true }),
       ],
       files: {
         'knip.config.ts':

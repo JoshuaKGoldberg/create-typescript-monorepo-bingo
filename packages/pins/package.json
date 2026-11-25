@@ -2,7 +2,7 @@
   "name": "@ctm/pins",
   "version": "0.0.0",
   "private": true,
-  "description": "Versions of dependencies that create-typescript-monorepo-bingo writes into repositories, kept here so Renovate updates them",
+  "description": "Dependency versions used by create-typescript-monorepo-bingo",
   "license": "MIT",
   "type": "module",
   "exports": {

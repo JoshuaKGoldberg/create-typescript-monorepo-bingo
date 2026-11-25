@@ -6,9 +6,6 @@ import { pinned } from '../../utils/pins.ts';
 import { blockPnpmWorkspace } from './blockPnpmWorkspace.ts';
 import { blockRootPackageJson } from './blockRootPackageJson.ts';
 
-/**
- * Sets up simple-git-hooks with lint-staged to format staged files on commit.
- */
 export const blockGitHooks = rootBase.createBlock({
   about: {
     name: 'Git Hooks',
@@ -30,12 +27,10 @@ export const blockGitHooks = rootBase.createBlock({
     otherTool: z.string().optional(),
   },
   produce({ options, props }) {
-    // A repository with its own Git hooks setup keeps it.
     if (props.otherTool) {
       return {};
     }
 
-    // The hook only formats, so there's nothing for it to run.
     if (options.formatter === 'none') {
       return {};
     }

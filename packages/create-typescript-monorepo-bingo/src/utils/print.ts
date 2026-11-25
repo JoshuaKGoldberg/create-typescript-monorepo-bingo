@@ -1,10 +1,7 @@
 import { parseSync } from 'oxc-parser';
 
 /**
- * Which objects and arrays in an existing file were written across multiple lines,
- * by path (keys and indices joined with `/`). Printing with a layout keeps each
- * existing object and array on one line or many, as it was, so files CTM round-trips
- * don't churn; new objects and arrays fall back to the printer's defaults.
+ * Whether objects and arrays span multiple lines, keyed by path.
  */
 export type Layout = Map<string, boolean>;
 
@@ -17,9 +14,6 @@ interface AstNode {
 
 const printWidth = 100;
 
-/**
- * Reads the layout of a JSON file.
- */
 export function readJsonLayout(text: string | undefined): Layout | undefined {
   if (text === undefined) {
     return undefined;
@@ -35,9 +29,6 @@ export function readJsonLayout(text: string | undefined): Layout | undefined {
   return readLayout(source, statement.expression as AstNode);
 }
 
-/**
- * Reads the layout of an AST expression within its source text.
- */
 export function readLayout(source: string, node: AstNode): Layout {
   const layout: Layout = new Map();
 
@@ -77,11 +68,6 @@ export interface PrintSettings {
   style: 'json' | 'ts';
 }
 
-/**
- * Prints a JSON-compatible value as JSON or as a TypeScript expression.
- * Without layout hints, JSON objects are expanded and other objects and arrays
- * stay on one line when they fit and only contain primitives.
- */
 export function printValue(value: unknown, settings: PrintSettings): string {
   return print(value, settings, '', '', 0);
 }
@@ -112,7 +98,7 @@ function print(
     return `${open}${close}`;
   }
 
-  // New array elements take the layout of their existing siblings.
+  // New elements match the layout of their siblings
   const elementHint = isArray
     ? entries
         .map(([key]) => settings.layout?.get(`${path}/${key}`))

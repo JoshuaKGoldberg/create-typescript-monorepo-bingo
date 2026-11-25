@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in contributing to Create TypeScript Monorepo (Bingo)! 💖
+Thanks for your interest in contributing to `create-typescript-monorepo-bingo`! 🗃️
 
 ## Code of Conduct
 

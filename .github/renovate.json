@@ -8,7 +8,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "GitHub Actions versions that create-typescript-monorepo-bingo writes into workflows",
+      "description": "GitHub Actions versions used by create-typescript-monorepo-bingo",
       "managerFilePatterns": [
         "/packages/create-typescript-monorepo-bingo/src/utils/actions\\.ts$/"
       ],

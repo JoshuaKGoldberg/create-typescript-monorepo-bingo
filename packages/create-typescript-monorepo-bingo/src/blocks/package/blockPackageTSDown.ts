@@ -4,10 +4,6 @@ import { packageBase } from '../../bases/packageBase.ts';
 import { readText } from '../../utils/files.ts';
 import { getBuildPackageName } from '../../utils/options.ts';
 
-/**
- * Creates a package's `tsdown.config.ts`, which spreads the build package's base.
- * An existing config is kept as-is, since packages customize entries and exports.
- */
 export const blockPackageTSDown = packageBase.createBlock({
   about: {
     name: 'Package tsdown',

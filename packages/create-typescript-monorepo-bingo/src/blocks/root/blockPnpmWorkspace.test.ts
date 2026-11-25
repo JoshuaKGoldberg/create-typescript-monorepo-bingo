@@ -13,7 +13,7 @@ const options = {
 } satisfies RootOptions & { preset: string };
 
 describe(resolveCatalogEntries, () => {
-  it('keeps a newer disk entry than the forwarded pin', () => {
+  it('keeps an existing entry newer than the forwarded pin', () => {
     expect(
       resolveCatalogEntries(
         [
@@ -36,7 +36,7 @@ describe(resolveCatalogEntries, () => {
     ]);
   });
 
-  it('replaces a plain disk entry with a forwarded alias', () => {
+  it('replaces a plain existing entry with a forwarded alias', () => {
     expect(
       resolveCatalogEntries(
         [{ catalog: 'dev', dependency: 'typescript', specifier: '6.0.3' }],
@@ -65,7 +65,7 @@ describe(resolveCatalogEntries, () => {
     ).toEqual([{ catalog: 'prod', dependency: 'zod', specifier: '^4.6.0' }]);
   });
 
-  it('keeps disk entries nobody forwarded', () => {
+  it("keeps existing entries that aren't forwarded", () => {
     expect(
       resolveCatalogEntries([{ catalog: 'site', dependency: 'astro', specifier: '6.0.0' }], []),
     ).toEqual([{ catalog: 'site', dependency: 'astro', specifier: '6.0.0' }]);

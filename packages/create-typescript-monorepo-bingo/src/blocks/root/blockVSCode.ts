@@ -2,13 +2,9 @@ import { z } from 'zod';
 
 import { rootBase } from '../../bases/rootBase.ts';
 import { parseJsonText, readText } from '../../utils/files.ts';
-import { formatJson, sortKeys, withDefaults } from '../../utils/json.ts';
+import { formatJson, omitKeys, sortKeys, withDefaults } from '../../utils/json.ts';
 import { mergeList } from '../../utils/lists.ts';
 
-/**
- * Owns `.vscode/`: recommended extensions, settings, and debug launch configurations.
- * Existing settings and recommendations are kept.
- */
 export const blockVSCode = rootBase.createBlock({
   about: {
     name: 'VS Code',
@@ -42,13 +38,13 @@ export const blockVSCode = rootBase.createBlock({
       | undefined;
     const extensions = mergeList(existingExtensions, props.extensions ?? []);
     const existingSettings = parseJsonText(texts.settings);
-    // A new file's settings are sorted; an existing one keeps its keys in place,
-    // with any it's missing appended.
     const ours = {
-      // Without a formatter, VS Code's built-in one would restyle files.
+      // Without a formatter, VS Code's built-in one would restyle files
       ...(options.formatter !== 'none' && { 'editor.formatOnSave': true }),
       'editor.rulers': [100],
-      ...props.settings,
+      ...(existingSettings['typescript.tsdk'] === undefined
+        ? props.settings
+        : omitKeys(props.settings ?? {}, ['js/ts.tsdk.path'])),
     };
     const settings = {
       ...(texts.settings === undefined ? sortKeys(ours) : withDefaults(existingSettings, ours)),
@@ -90,8 +86,7 @@ export const blockVSCode = rootBase.createBlock({
 const stockTsdk = 'node_modules/typescript/lib';
 
 /**
- * The typescript alias's own lib/ has no tsserver.js, so tsdk settings pointing at the stock
- * node_modules/typescript/lib are moved to CTM's path. Any other tsdk value is kept.
+ * The TypeScript 6 alias has no tsserver.js, so stock tsdk paths are replaced.
  */
 function updateStockTsdk(existing: Record<string, unknown>, ours: unknown) {
   if (typeof ours !== 'string') {

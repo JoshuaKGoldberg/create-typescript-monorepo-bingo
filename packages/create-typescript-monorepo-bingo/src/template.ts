@@ -4,10 +4,6 @@ import { rootOptionsShape } from './options.ts';
 import { prepareRoot } from './prepare/prepareRoot.ts';
 import { produceMonorepo } from './production/produceMonorepo.ts';
 
-/**
- * The create-typescript-monorepo-bingo Template: a pnpm workspace of tsdown-built
- * TypeScript packages, with shared config in a private build package.
- */
 export const template = createTemplate({
   about: {
     name: 'create-typescript-monorepo-bingo',
@@ -18,7 +14,6 @@ export const template = createTemplate({
 });
 
 /**
- * Creates a config file for the template, such as a `create-typescript-monorepo-bingo.config.ts`
- * whose `options` override what's inferred, for example a package's `kind`.
+ * Creates a config file that overrides inferred options, such as a package's `kind`.
  */
 export const createConfig: typeof template.createConfig = template.createConfig;

@@ -40,18 +40,18 @@ describe(resolveSpecifier, () => {
     expect(resolveSpecifier(undefined, '1.2.3')).toBe('1.2.3');
   });
 
-  it('keeps a protocol specifier on disk', () => {
+  it('keeps an existing protocol specifier', () => {
     expect(resolveSpecifier('catalog:react18', '19.0.0')).toBe('catalog:react18');
     expect(resolveSpecifier('workspace:^', '1.0.0')).toBe('workspace:^');
   });
 
-  it("replaces bingo's root typescript with the TypeScript 6 alias", () => {
+  it('replaces an exact 6.0.3 version with the TypeScript 6 alias', () => {
     expect(resolveSpecifier('6.0.3', 'npm:@typescript/typescript6@6.0.2')).toBe(
       'npm:@typescript/typescript6@6.0.2',
     );
   });
 
-  it("replaces bingo's build package ~6.0.3 with the TypeScript 6 alias", () => {
+  it('replaces a ~6.0.3 range with the TypeScript 6 alias', () => {
     expect(resolveSpecifier('~6.0.3', 'npm:@typescript/typescript6@6.0.2')).toBe(
       'npm:@typescript/typescript6@6.0.2',
     );
@@ -69,7 +69,7 @@ describe(resolveSpecifier, () => {
     );
   });
 
-  it('keeps a newer prerelease alias, as flint has', () => {
+  it('keeps a newer prerelease alias', () => {
     expect(resolveSpecifier('npm:typescript@7.1.0-dev.20261101', 'npm:typescript@7.0.2')).toBe(
       'npm:typescript@7.1.0-dev.20261101',
     );

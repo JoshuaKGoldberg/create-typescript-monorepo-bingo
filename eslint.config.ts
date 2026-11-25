@@ -55,15 +55,15 @@ export default defineConfig(
       'no-restricted-syntax': [
         'error',
         {
-          selector: 'ExportAllDeclaration[exported=null]',
           message: "Do not use 'export * from' statements. Please export individual symbols.",
+          selector: 'ExportAllDeclaration[exported=null]',
         },
       ],
       'perfectionist/sort-exports': 'error',
       'perfectionist/sort-named-exports': 'error',
       'perfectionist/sort-named-imports': 'error',
 
-      // Stylistic concerns that don't interfere with Oxfmt
+      // Stylistic concerns that don't interfere with formatters
       'logical-assignment-operators': ['error', 'always', { enforceForIfStatements: true }],
       'no-useless-rename': 'error',
       'object-shorthand': 'error',

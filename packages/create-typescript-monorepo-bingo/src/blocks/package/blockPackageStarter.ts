@@ -3,16 +3,11 @@ import { z } from 'zod';
 import { packageBase } from '../../bases/packageBase.ts';
 import { getEntry } from '../../utils/files.ts';
 
-/**
- * Creates a new package's README and starter source and test files.
- * Packages that already have them keep theirs.
- */
 export const blockPackageStarter = packageBase.createBlock({
   about: {
     name: 'Package Starter',
   },
   intake({ files }) {
-    // Only new packages get starter files: an existing one's are its own.
     const isExisting = getEntry(files, 'package.json') !== undefined;
     return {
       hasReadme: isExisting || getEntry(files, 'README.md') !== undefined,
@@ -33,7 +28,6 @@ export const blockPackageStarter = packageBase.createBlock({
         }),
         ...(!props.hasSource && {
           src: {
-            // Other test runners get no starter test, since it's written for Vitest.
             ...(options.testRunner !== 'other' && {
               'greet.test.ts': `import { describe, expect, it } from 'vitest';
 
