@@ -4,9 +4,15 @@ import { rootOptionsShape } from './options.ts';
 import { prepareRoot } from './prepare/prepareRoot.ts';
 import { produceMonorepo } from './production/produceMonorepo.ts';
 
+export const templateRepository = {
+  owner: 'JoshuaKGoldberg',
+  repository: 'create-typescript-monorepo-bingo',
+};
+
 export const template = createTemplate({
   about: {
     name: 'create-typescript-monorepo-bingo',
+    repository: templateRepository,
   },
   options: rootOptionsShape,
   prepare: prepareRoot,
