@@ -104,6 +104,95 @@ describe(produceMonorepo, () => {
     }
   });
 
+  it('only sends requests for new repositories', () => {
+    const transition = produceMonorepo({
+      files: toIntake(setup.files ?? {}),
+      mode: 'transition',
+      options: { ...options, keywords: ['one'] },
+    });
+
+    expect(transition.requests ?? []).toEqual([]);
+  });
+
+  it('sets up the GitHub repository with the same description, topics, and CI jobs', () => {
+    const creation = produceMonorepo({
+      mode: 'setup',
+      options: { ...options, keywords: ['Type Script', 'example'] },
+    });
+    const requests = (creation.requests ?? []).filter((request) => request.type === 'octokit');
+    const find = (endpoint: string) =>
+      requests.find((request) => request.endpoint === endpoint)?.parameters;
+
+    expect(find('PATCH /repos/{owner}/{repo}')).toMatchObject({
+      allow_merge_commit: false,
+      description: 'An example monorepo.',
+      owner: 'example-org',
+      repo: 'example',
+    });
+    expect(find('PUT /repos/{owner}/{repo}/topics')).toMatchObject({
+      names: ['type-script', 'example'],
+    });
+    expect(JSON.parse(readFile(creation.files, 'packages/example/package.json'))).toMatchObject({
+      keywords: ['Type Script', 'example'],
+    });
+
+    const ruleset = find('POST /repos/{owner}/{repo}/rulesets') as {
+      rules: { parameters?: { required_status_checks?: { context: string }[] } }[];
+    };
+    expect(
+      ruleset.rules
+        .flatMap((rule) => rule.parameters?.required_status_checks ?? [])
+        .map((check) => check.context),
+    ).toEqual([
+      'Build',
+      'Dedupe Check',
+      'Format Check',
+      'Knip',
+      'Lint',
+      'Lint Spelling',
+      'Test (macos-latest)',
+      'Test (ubuntu-latest)',
+      'Test (windows-latest)',
+      'Type Check',
+    ]);
+  });
+
+  it('gives a new GitHub repository each label exactly once', () => {
+    const labels = (setup.requests ?? []).flatMap((request) =>
+      request.type === 'octokit' && request.endpoint.includes('/labels')
+        ? [request as { endpoint: string; parameters: { name: string; new_name?: string } }]
+        : [],
+    );
+    const names = labels.map(({ parameters }) => parameters.new_name ?? parameters.name);
+    expect(new Set(names).size).toBe(names.length);
+
+    // GitHub's default labels
+    expect(
+      labels
+        .filter(({ endpoint }) => endpoint.startsWith('PATCH'))
+        .map(({ parameters }) => parameters.name)
+        .sort(),
+    ).toEqual([
+      'bug',
+      'documentation',
+      'duplicate',
+      'enhancement',
+      'good first issue',
+      'help wanted',
+      'invalid',
+      'question',
+      'wontfix',
+    ]);
+
+    const templates = listFiles(setup.files ?? {}).filter((file) =>
+      file.startsWith('.github/ISSUE_TEMPLATE/'),
+    );
+    for (const file of templates) {
+      const { labels: used } = parse(readFile(setup.files, file)) as { labels: string[] };
+      expect(names).toEqual(expect.arrayContaining(used));
+    }
+  });
+
   it.each(['release', 'transitions'])('skips the %s workflow without a GitHub App', (name) => {
     const creation = produceMonorepo({
       mode: 'setup',

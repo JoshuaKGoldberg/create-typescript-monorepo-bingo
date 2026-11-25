@@ -20,6 +20,9 @@ import { blockOctoGuide } from './blocks/root/blockOctoGuide.ts';
 import { blockOxfmt } from './blocks/root/blockOxfmt.ts';
 import { blockPnpmWorkspace } from './blocks/root/blockPnpmWorkspace.ts';
 import { blockRenovate } from './blocks/root/blockRenovate.ts';
+import { blockRepositoryLabels } from './blocks/root/blockRepositoryLabels.ts';
+import { blockRepositoryRuleset } from './blocks/root/blockRepositoryRuleset.ts';
+import { blockRepositorySettings } from './blocks/root/blockRepositorySettings.ts';
 import { blockRootPackageJson } from './blocks/root/blockRootPackageJson.ts';
 import { blockRootTSConfig } from './blocks/root/blockRootTSConfig.ts';
 import { blockSite } from './blocks/root/blockSite.ts';
@@ -47,6 +50,9 @@ const rootBlocks = [
   blockPnpmTasks,
   blockPnpmWorkspace,
   blockRenovate,
+  blockRepositoryLabels,
+  blockRepositoryRuleset,
+  blockRepositorySettings,
   blockRootPackageJson,
   blockRootTSConfig,
   blockSite,

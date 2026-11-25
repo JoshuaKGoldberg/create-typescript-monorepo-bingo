@@ -72,6 +72,10 @@ export const rootOptionsShape = {
     .describe(
       "formatter to use: 'biome' (existing repositories only), 'none', 'oxfmt', or 'prettier'",
     ),
+  keywords: z
+    .array(z.string())
+    .optional()
+    .describe("keywords for new packages and a new GitHub repository's topics"),
   linter: literalUnion(['eslint', 'none'] as const)
     .optional()
     .describe("linter to use: 'eslint' or 'none'"),

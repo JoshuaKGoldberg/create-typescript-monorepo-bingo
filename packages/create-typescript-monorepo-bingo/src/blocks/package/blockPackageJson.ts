@@ -111,6 +111,7 @@ export const blockPackageJson = packageBase.createBlock({
       ? {
           version: '0.0.0',
           description: pkg.description,
+          ...(options.keywords?.length && { keywords: [...options.keywords].sort() }),
           repository: {
             type: 'git',
             url: getRepositoryUrl(options),
