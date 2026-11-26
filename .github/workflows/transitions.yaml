@@ -22,7 +22,7 @@ jobs:
         run: pnpm install --no-frozen-lockfile && pnpm format
       - name: Create Token
         id: create_token
-        uses: actions/create-github-app-token@v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           client-id: ${{ vars.RELEASEBOT_APP_CLIENT_ID }}
           permission-contents: write
