@@ -5,7 +5,7 @@ import type { RootOptions } from '../options.ts';
  */
 const actionVersions: Partial<Record<string, readonly [version: string, digest: string]>> = {
   'actions/checkout': ['v7.0.1', '3d3c42e5aac5ba805825da76410c181273ba90b1'], // renovate: datasource=github-tags depName=actions/checkout
-  'actions/create-github-app-token': ['v3.3.0', '64ab729a6294000f5aa4a4bc0b73d1f32bc45510'], // renovate: datasource=github-tags depName=actions/create-github-app-token
+  'actions/create-github-app-token': ['v3.4.0', 'f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc'], // renovate: datasource=github-tags depName=actions/create-github-app-token
   'changesets/action': ['v2.1.2', 'ae32849d5ba541f9ae29e40e22a623bc13562f51'], // renovate: datasource=github-tags depName=changesets/action
   'codecov/codecov-action': ['v7.1.1', '303a32d7a59b442fa8d48b6a1cc6825c09c847a5'], // renovate: datasource=github-tags depName=codecov/codecov-action
   'JoshuaKGoldberg/all-contributors-auto-action': [
