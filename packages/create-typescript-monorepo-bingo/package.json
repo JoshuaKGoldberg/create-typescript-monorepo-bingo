@@ -32,7 +32,7 @@
     "dist/"
   ],
   "dependencies": {
-    "bingo": "^0.16.2",
+    "bingo": "^0.17.0",
     "bingo-fs": "^0.9.0",
     "bingo-stratum": "^0.11.1",
     "bingo-systems": "^0.9.1",
