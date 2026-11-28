@@ -112,7 +112,7 @@ jobs:
       - uses: $/.github/actions/setup
       - run: pnpm test ${{ matrix.os == 'ubuntu-latest' && '--coverage' || '' }}
       - if: success() && (matrix.os == 'ubuntu-latest') && github.event.pull_request.head.repo.fork != true
-        uses: codecov/codecov-action@v7.1.1
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           fail_ci_if_error: true
           use_oidc: true
