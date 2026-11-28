@@ -295,10 +295,10 @@ importers:
         version: 0.9.0
       bingo-stratum:
         specifier: ^0.11.1
-        version: 0.11.1(bingo-fs@0.9.0)(bingo-systems@0.9.1)(bingo@0.16.2(zod@4.6.7))(zod@4.6.7)
+        version: 0.11.1(bingo-fs@0.9.0)(bingo-systems@0.10.1)(bingo@0.16.2(zod@4.6.7))(zod@4.6.7)
       bingo-systems:
-        specifier: ^0.9.1
-        version: 0.9.1
+        specifier: ^0.10.0
+        version: 0.10.1
       ignore:
         specifier: ^7.0.5
         version: 7.0.16
@@ -2301,6 +2301,10 @@ packages:
       bingo-fs: ^0.8.0
       bingo-systems: ^0.9.1
       zod: ^4.4.3
+
+  bingo-systems@0.10.1:
+    resolution: {integrity: sha512-ZOJWjn9Eu8lFd4mf1926IxTnuv/JKSp/zVOXt9Q3mlaq2nCnUrj7i+mmIJ4kW5AHw748/TiDbU3N0LaF9gb6XA==}
+    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   bingo-systems@0.9.1:
     resolution: {integrity: sha512-e+i6L4c2Jnhb48b2v8+IT3Xer8SPwr8RS9gTMKB7FQvIfg90ceLj+fDYKI9c6TR3Yy7JP+Tl2ZMLizzeWf85sg==}
@@ -5597,18 +5601,25 @@ snapshots:
     dependencies:
       '@octokit/types': 18.0.0
 
-  bingo-stratum@0.11.1(bingo-fs@0.9.0)(bingo-systems@0.9.1)(bingo@0.16.2(zod@4.6.7))(zod@4.6.7):
+  bingo-stratum@0.11.1(bingo-fs@0.9.0)(bingo-systems@0.10.1)(bingo@0.16.2(zod@4.6.7))(zod@4.6.7):
     dependencies:
       all-properties-lazy: 0.1.0
       bingo: 0.16.2(zod@4.6.7)
       bingo-fs: 0.9.0
-      bingo-systems: 0.9.1
+      bingo-systems: 0.10.1
       cached-factory: 0.3.0
       hash-object: 5.1.0
       octokit: 5.0.5
       slugify: 1.6.9
       without-undefined-properties: 0.1.2
       zod: 4.6.7
+
+  bingo-systems@0.10.1:
+    dependencies:
+      bingo-fs: 0.9.0
+      execa: 10.2.1
+      get-github-auth-token: 0.2.0
+      octokit: 5.0.5
 
   bingo-systems@0.9.1:
     dependencies:
